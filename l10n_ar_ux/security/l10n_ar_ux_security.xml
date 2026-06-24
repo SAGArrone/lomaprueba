@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="group_include_pending_receivable_documents" model="res.groups">
+        <field name="name">Mostrar comprobantes pendientes en Recibos de Clientes</field>
+    </record>
+
+</odoo>
