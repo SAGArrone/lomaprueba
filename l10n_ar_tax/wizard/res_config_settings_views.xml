@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record model="ir.ui.view" id="res_config_settings_view_form">
+        <field name="name">res.config.settings.view.form.inherit.l10n_ar_afip_ws</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="l10n_ar.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+
+            <xpath expr="//block[@id='argentina_localization']" position="inside">
+                <setting id="arba_cit" string="ARBA" company_dependent="1" title="Enter the CIT key if you use the ARBA padron for IIBB withholding/perception.">
+                    <div class="content-group" invisible="country_code != 'AR'">
+                        <div class="row mt16">
+                            <label for="arba_cit" class="col-lg-3 o_light_label"/>
+                            <field name="arba_cit" password="True"/>
+                        </div>
+                        <div class="row mt16">
+                            <button name="l10n_ar_arba_cit_test" type="object" class="oe_link oe_inline" string="⇒ Verify ARBA Key" help="Verifies the CIT key against the ARBA production server."/>
+                        </div>
+
+                    </div>
+                </setting>
+            </xpath>
+        <setting id="sepa_payments" position="after">
+                    <setting id="show_reversal_moves_in_receipts" string="Show reversal moves in receipts"
+                        help="Shows debit and credit notes in payment receipts as separate moves.">
+                        <field name="show_reversal_moves_in_receipts"/>
+                    </setting>
+                </setting>
+        </field>
+    </record>
+
+</odoo>
