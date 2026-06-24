@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_account_journal_form" model="ir.ui.view">
+        <field name="name">account.journal.form</field>
+        <field name="model">account.journal</field>
+        <field name="inherit_id" ref="account.view_account_journal_form"/>
+        <field name="arch" type="xml">
+            <field name="country_code" position="before">
+                <field name="has_child_companies" invisible="1"/>
+                <field name="shared_to_branches" groups="base.group_multi_company" invisible="not has_child_companies"/>
+                <field name="mail_template_id"  context="{'default_model': 'account.move'}"  invisible="type not in ['sale', 'purchase']"/>
+            </field>
+            <field name="payment_sequence" position="after">
+                    <div colspan="2">
+                        <p invisible="type not in ['bank', 'cash'] or not payment_sequence">
+                            <i>Please note that when this box is selected, you must ensure that the
+                            payments follow a different sequence format.</i>
+                        </p>
+                    </div>
+            </field>
+            <xpath expr="//form/sheet" position="before">
+                <div class="alert alert-warning" invisible="not show_warning_shared_to_branches" colspan="2" role="alert">
+                    <p>
+                    <b>Warning:</b> This journal seems to be using documents without a VAT number setting in the company.
+                    </p>
+                </div>
+            </xpath>
+        </field>
+    </record>
+</odoo>
