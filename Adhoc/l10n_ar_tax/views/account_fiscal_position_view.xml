@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="view_account_position_form" model="ir.ui.view">
+        <field name="name">account.fiscal.position.form</field>
+        <field name="model">account.fiscal.position</field>
+        <field name="inherit_id" ref="account.view_account_position_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='company_id'][@groups='base.group_multi_company']" position="before">
+                <field
+                    name="l10n_ar_tax_type"
+                    invisible="'AR' not in fiscal_country_codes"
+                    widget="radio"
+                    options="{'horizontal': true}"
+                />
+            </xpath>
+            <notebook>
+                <page
+                    string="Perceptions and Withholdings"
+                    invisible="'AR' not in fiscal_country_codes or not l10n_ar_tax_type or l10n_ar_tax_type == 'none'"
+                >
+                    <field name="l10n_ar_tax_ids" context="{'default_tax_type': l10n_ar_tax_type}">
+                        <list editable="bottom">
+                            <field name="tax_type" column_invisible="1"/>
+                            <field name="l10n_ar_is_iibb" column_invisible="1"/>
+                            <field
+                                name="tax_group_id"
+                                domain="tax_group_id_domain"
+                                options="{'no_create': True}"
+                            />
+                            <field name="aliquot" string="Default Aliquot (%)" readonly="not l10n_ar_is_iibb"/>
+                            <field
+                                name="default_tax_id"
+                                domain="tax_template_domain"
+                                options="{'no_create': True}"
+                                readonly="l10n_ar_is_iibb"
+                            />
+                            <field name="webservice"/>
+                            <field name="tax_template_domain" column_invisible="1"/>
+                            <field name="tax_group_id_domain" column_invisible="1"/>
+                        </list>
+                    </field>
+                </page>
+            </notebook>
+            <xpath expr="//field[@name='foreign_vat']" position="attributes">
+                <attribute name="invisible" add="'AR' in fiscal_country_codes" separator="or"/>
+            </xpath>
+            <xpath expr="//field[@name='country_group_id']" position="attributes">
+                <attribute name="invisible" add="'AR' in fiscal_country_codes" separator="or"/>
+            </xpath>
+            <xpath expr="//label[@for='zip_from']" position="attributes">
+                <attribute name="invisible" add="'AR' in fiscal_country_codes" separator="or"/>
+            </xpath>
+            <xpath expr="//div[field[@name='zip_from']]" position="attributes">
+                <attribute name="invisible" add="'AR' in fiscal_country_codes" separator="or"/>
+            </xpath>
+            <xpath expr="//page[@name='account_mapping']" position="attributes">
+                <attribute name="invisible" add="'AR' in fiscal_country_codes" separator="or"/>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>
