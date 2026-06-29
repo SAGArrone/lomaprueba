@@ -15,6 +15,7 @@ class AccountMove(models.Model):
     def write(self, vals):
         res = super().write(vals)
         watched_fields = {
+            "invoice_line_ids",
             "partner_id",
             "move_type",
             "company_id",
@@ -47,9 +48,11 @@ class AccountMove(models.Model):
         )
         if not lines:
             lines = self.line_ids.filtered(
-                lambda line: not line.display_type
-                and line.product_id
-                and not line.tax_line_id
+                lambda line: (
+                    not line.display_type
+                    and line.product_id
+                    and not line.tax_line_id
+                )
             )
         return lines
 
@@ -65,34 +68,20 @@ class AccountMove(models.Model):
             taxes_without_rg = line.tax_ids - perception_taxes
 
             if line.product_id.categ_id.id not in reached_category_ids:
-                _logger.info(
-                    "RG5329 BASE SKIP categoria no alcanzada product=%s category=%s",
-                    line.product_id.display_name,
-                    line.product_id.categ_id.display_name,
-                )
                 continue
 
             rate_key = company._l10n_ar_rg5329_rate_key_from_taxes(taxes_without_rg)
 
-            _logger.info(
-                "RG5329 BASE LINE product=%s subtotal=%s taxes=%s rate_key=%s",
-                line.product_id.display_name,
-                line.price_subtotal,
-                taxes_without_rg.mapped("name"),
-                rate_key,
-            )
-
             if rate_key:
                 bases[rate_key] += line.price_subtotal
 
-        _logger.info("RG5329 BASES ACUMULADAS: %s", bases)
+        _logger.info("RG5329 MOVE BASES ACUMULADAS: %s", bases)
         return bases
 
     def _l10n_ar_rg5329_applicable_rate_keys(self):
         self.ensure_one()
 
         if not self._l10n_ar_rg5329_can_apply():
-            _logger.info("RG5329 MOVE no aplica por condiciones generales")
             return set()
 
         invoice_currency = self.currency_id or self.company_currency_id
@@ -116,11 +105,10 @@ class AccountMove(models.Model):
             )
 
             _logger.info(
-                "RG5329 RATE CHECK rate_key=%s base_total=%s alicuota=%s perception=%s perception_company=%s min=%s",
+                "RG5329 MOVE RATE CHECK rate_key=%s base_total=%s alicuota=%s perception=%s min=%s",
                 rate_key,
                 base,
                 RG5329_TAX_SPECS[rate_key]["amount"],
-                perception_amount,
                 perception_amount_company,
                 self.company_id.l10n_ar_rg5329_min_amount,
             )
@@ -131,11 +119,11 @@ class AccountMove(models.Model):
                     self.company_id.l10n_ar_rg5329_min_amount,
                     precision_rounding=company_currency.rounding,
                 )
-                > 0
+                >= 0
             ):
                 applicable.add(rate_key)
 
-        _logger.info("RG5329 RATE KEYS APLICABLES: %s", applicable)
+        _logger.info("RG5329 MOVE RATE KEYS APLICABLES: %s", applicable)
         return applicable
 
     def _l10n_ar_rg5329_sync_invoice_taxes(self):
@@ -166,7 +154,7 @@ class AccountMove(models.Model):
 
             if not product_lines:
                 _logger.info(
-                    "RG5329 MOVE >>> Sin lineas visibles. No recalculo para no pisar onchange de linea."
+                    "RG5329 MOVE >>> Sin lineas visibles. No recalculo para no pisar onchange."
                 )
                 continue
 
@@ -262,71 +250,34 @@ class AccountMoveLine(models.Model):
                 line.tax_ids = taxes
                 continue
 
-            bases = {rate_key: 0.0 for rate_key in RG5329_TAX_SPECS}
-
-            sibling_lines = move.invoice_line_ids.filtered(
-                lambda item: not item.display_type and item.product_id
+            base = line.price_subtotal
+            perception_amount = (
+                base * RG5329_TAX_SPECS[current_rate_key]["amount"] / 100.0
             )
 
-            if not sibling_lines:
-                sibling_lines = line
+            _logger.info(
+                "RG5329 LINE RATE CHECK rate_key=%s base_linea=%s alicuota=%s perception=%s min=%s",
+                current_rate_key,
+                base,
+                RG5329_TAX_SPECS[current_rate_key]["amount"],
+                perception_amount,
+                company.l10n_ar_rg5329_min_amount,
+            )
 
-            for sibling in sibling_lines:
-                sibling_taxes = sibling.tax_ids - perception_taxes
-
-                if (
-                    not sibling.product_id
-                    or sibling.product_id.categ_id.id not in reached_category_ids
-                ):
-                    continue
-
-                sibling_rate_key = company._l10n_ar_rg5329_rate_key_from_taxes(
-                    sibling_taxes
-                )
-
-                if sibling_rate_key:
-                    bases[sibling_rate_key] += sibling.price_subtotal
-
-            if not bases.get(current_rate_key):
-                bases[current_rate_key] = line.price_subtotal
-
-            _logger.info("RG5329 LINE BASES ACUMULADAS: %s", bases)
-
-            applicable_rate_keys = set()
-            for rate_key, base in bases.items():
-                perception_amount = (
-                    base * RG5329_TAX_SPECS[rate_key]["amount"] / 100.0
-                )
-
-                _logger.info(
-                    "RG5329 LINE RATE CHECK rate_key=%s base_total=%s alicuota=%s perception=%s min=%s",
-                    rate_key,
-                    base,
-                    RG5329_TAX_SPECS[rate_key]["amount"],
+            if (
+                float_compare(
                     perception_amount,
                     company.l10n_ar_rg5329_min_amount,
+                    precision_rounding=move.currency_id.rounding,
                 )
-
-                if (
-                    float_compare(
-                        perception_amount,
-                        company.l10n_ar_rg5329_min_amount,
-                        precision_rounding=move.currency_id.rounding,
-                    )
-                    > 0
-                ):
-                    applicable_rate_keys.add(rate_key)
-
-            _logger.info("RG5329 LINE RATE KEYS APLICABLES: %s", applicable_rate_keys)
-
-            if current_rate_key in applicable_rate_keys:
+                >= 0
+            ):
                 perception_tax = tax_by_rate.get(current_rate_key)
                 if perception_tax:
                     _logger.info("RG5329 LINE >>> AGREGO %s", perception_tax.name)
                     line.tax_ids = taxes | perception_tax
                 else:
-                    _logger.info("RG5329 LINE >>> NO ENCONTRO IMPUESTO RG")
                     line.tax_ids = taxes
             else:
-                _logger.info("RG5329 LINE >>> NO APLICA POR TOTAL ACUMULADO")
+                _logger.info("RG5329 LINE >>> NO APLICA POR MINIMO")
                 line.tax_ids = taxes
