@@ -142,39 +142,52 @@ class ResCompany(models.Model):
             ],
         }
 
-    def _l10n_ar_rg5329_find_tax(self, rate_key):
-        self.ensure_one()
-        spec = RG5329_TAX_SPECS[rate_key]
-        Tax = self.env["account.tax"].sudo().with_company(self)
+def _l10n_ar_rg5329_ensure_taxes(self):
+    MoveLine = self.env["account.move.line"].sudo()
 
-        tax = Tax.search(
-            [
-                ("company_id", "=", self.id),
-                ("l10n_ar_rg5329_perception", "=", True),
-                ("l10n_ar_rg5329_vat_rate", "=", rate_key),
-            ],
-            limit=1,
-        )
-        if tax:
-            return tax
+    for company in self:
+        if not company._l10n_ar_rg5329_has_required_configuration():
+            continue
 
-        tax = Tax.search(
-            [
-                ("company_id", "=", self.id),
-                ("name", "=", spec["name"]),
-                ("type_tax_use", "=", "sale"),
-                ("amount_type", "=", "percent"),
-            ],
-            limit=1,
-        )
-        if tax:
-            tax.write(
-                {
-                    "l10n_ar_rg5329_perception": True,
-                    "l10n_ar_rg5329_vat_rate": rate_key,
-                }
-            )
-        return tax
+        for rate_key in RG5329_TAX_SPECS:
+            tax = company._l10n_ar_rg5329_find_tax(rate_key)
+
+            if not tax:
+                self.env["account.tax"].sudo().with_company(company).create(
+                    company._l10n_ar_rg5329_tax_values(rate_key)
+                )
+                continue
+
+            move_line_count = MoveLine.search_count([
+                "|",
+                ("tax_line_id", "=", tax.id),
+                ("tax_ids", "in", tax.id),
+            ])
+
+            if move_line_count:
+                continue
+
+            spec = RG5329_TAX_SPECS[rate_key]
+
+            tax.write({
+                "name": spec["name"],
+                "amount_type": "percent",
+                "amount": spec["amount"],
+                "type_tax_use": "sale",
+                "tax_group_id": company.l10n_ar_rg5329_tax_group_id.id,
+                "price_include": False,
+                "include_base_amount": False,
+                "l10n_ar_rg5329_perception": True,
+                "l10n_ar_rg5329_vat_rate": rate_key,
+            })
+
+            tax.invoice_repartition_line_ids.filtered(
+                lambda line: line.repartition_type == "tax"
+            ).write({"account_id": company.l10n_ar_rg5329_account_id.id})
+
+            tax.refund_repartition_line_ids.filtered(
+                lambda line: line.repartition_type == "tax"
+            ).write({"account_id": company.l10n_ar_rg5329_account_id.id})
 
     def _l10n_ar_rg5329_ensure_taxes(self):
         for company in self:
