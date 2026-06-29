@@ -31,6 +31,11 @@ class AccountMove(models.Model):
 
     @api.onchange(
         "invoice_line_ids",
+        "invoice_line_ids.product_id",
+        "invoice_line_ids.quantity",
+        "invoice_line_ids.price_unit",
+        "invoice_line_ids.discount",
+        "invoice_line_ids.tax_ids",
         "partner_id",
         "move_type",
         "company_id",
@@ -136,6 +141,43 @@ class AccountMove(models.Model):
                         taxes |= tax_by_rate[rate_key]
 
                 if set(taxes.ids) != set(line.tax_ids.ids):
-                    line.with_context(l10n_ar_rg5329_skip_invoice_sync=True).write(
-                        {"tax_ids": [Command.set(taxes.ids)]}
-                    )
+                    line.with_context(
+                        l10n_ar_rg5329_skip_invoice_sync=True
+                    ).tax_ids = [Command.set(taxes.ids)]
+
+
+class AccountMoveLine(models.Model):
+    _inherit = "account.move.line"
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        lines = super().create(vals_list)
+        if not self.env.context.get("l10n_ar_rg5329_skip_invoice_sync"):
+            lines._l10n_ar_rg5329_sync_parent_invoices()
+        return lines
+
+    def write(self, vals):
+        res = super().write(vals)
+        watched_fields = {
+            "product_id",
+            "quantity",
+            "price_unit",
+            "discount",
+            "tax_ids",
+            "display_type",
+        }
+        if watched_fields.intersection(vals) and not self.env.context.get(
+            "l10n_ar_rg5329_skip_invoice_sync"
+        ):
+            self._l10n_ar_rg5329_sync_parent_invoices()
+        return res
+
+    @api.onchange("product_id", "quantity", "price_unit", "discount", "tax_ids")
+    def _onchange_l10n_ar_rg5329_sync_parent_invoice(self):
+        self._l10n_ar_rg5329_sync_parent_invoices()
+
+    def _l10n_ar_rg5329_sync_parent_invoices(self):
+        moves = self.mapped("move_id").filtered(
+            lambda move: move.state == "draft" and move.move_type == "out_invoice"
+        )
+        moves._l10n_ar_rg5329_sync_invoice_taxes()

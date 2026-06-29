@@ -47,3 +47,17 @@ class ResConfigSettings(models.TransientModel):
             company._l10n_ar_rg5329_apply_configuration()
 
         return res
+
+    def action_l10n_ar_rg5329_sync_products(self):
+        self.ensure_one()
+        self.company_id.sudo().action_l10n_ar_rg5329_sync_products()
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("RG 5329"),
+                "message": _("Se actualizaron los impuestos RG 5329 en los productos alcanzados."),
+                "type": "success",
+                "sticky": False,
+            },
+        }

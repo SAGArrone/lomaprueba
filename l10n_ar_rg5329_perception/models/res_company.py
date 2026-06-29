@@ -236,7 +236,7 @@ class ResCompany(models.Model):
         categories = self.l10n_ar_rg5329_product_categ_ids
 
         if not categories:
-            return set(self.env["product.category"].sudo().search([]).ids)
+            return set()
 
         reached_categories = self.env["product.category"].sudo().search(
             [("id", "child_of", categories.ids)]
