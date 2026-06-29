@@ -1,5 +1,4 @@
-from odoo import Command, api, fields, models
-from odoo.exceptions import ValidationError
+from odoo import api, fields, models
 from odoo.tools import float_compare
 
 from .res_company import RG5329_TAX_SPECS
@@ -10,11 +9,6 @@ class AccountMove(models.Model):
 
     @api.onchange(
         "invoice_line_ids",
-        "invoice_line_ids.product_id",
-        "invoice_line_ids.quantity",
-        "invoice_line_ids.price_unit",
-        "invoice_line_ids.discount",
-        "invoice_line_ids.tax_ids",
         "partner_id",
         "move_type",
         "company_id",
@@ -132,33 +126,7 @@ class AccountMove(models.Model):
             applicable_rate_keys = move._l10n_ar_rg5329_applicable_rate_keys()
 
             for line in move.invoice_line_ids.filtered(lambda l: not l.display_type):
-                taxes_without_perception = line.tax_ids - perception_taxes
-                rate_key = company._l10n_ar_rg5329_rate_key_from_taxes(
-                    taxes_without_perception
-                )
-
-                raise ValidationError(
-                    "DEBUG RG5329\n"
-                    f"Regimen habilitado: {company.l10n_ar_rg5329_enabled}\n"
-                    f"Cliente: {move.partner_id.display_name}\n"
-                    f"Responsabilidad cliente: "
-                    f"{move.partner_id.commercial_partner_id.l10n_ar_afip_responsibility_type_id.display_name}\n"
-                    f"Cliente alcanzado: {company._l10n_ar_rg5329_is_partner_reached(move.partner_id)}\n"
-                    f"Categorias configuradas: {company.l10n_ar_rg5329_product_categ_ids.mapped('display_name')}\n"
-                    f"Categoria producto: {line.product_id.categ_id.display_name}\n"
-                    f"Categoria ID producto: {line.product_id.categ_id.id}\n"
-                    f"Categorias alcanzadas IDs: {company._l10n_ar_rg5329_reached_category_ids()}\n"
-                    f"Impuestos linea: {line.tax_ids.mapped('name')}\n"
-                    f"Impuestos sin RG: {taxes_without_perception.mapped('name')}\n"
-                    f"Rate detectado: {rate_key}\n"
-                    f"Base linea: {line.price_subtotal}\n"
-                    f"Bases por tasa: {move._l10n_ar_rg5329_base_by_rate()}\n"
-                    f"Rate keys aplicables: {applicable_rate_keys}\n"
-                    f"Impuestos RG: {company._l10n_ar_rg5329_perception_taxes().mapped('name')}\n"
-                    f"Tax by rate: { {k: v.mapped('name') for k, v in tax_by_rate.items()} }"
-                )
-
-                taxes = taxes_without_perception
+                taxes = line.tax_ids - perception_taxes
 
                 should_apply = (
                     move._l10n_ar_rg5329_can_apply()
@@ -166,8 +134,10 @@ class AccountMove(models.Model):
                     and line.product_id.categ_id.id in reached_category_ids
                 )
 
-                if should_apply and rate_key:
+                if should_apply:
+                    rate_key = company._l10n_ar_rg5329_rate_key_from_taxes(taxes)
                     perception_tax = tax_by_rate.get(rate_key)
+
                     if rate_key in applicable_rate_keys and perception_tax:
                         taxes |= perception_tax
 
@@ -175,3 +145,19 @@ class AccountMove(models.Model):
                     line.with_context(
                         l10n_ar_rg5329_skip_invoice_sync=True
                     ).tax_ids = taxes
+
+
+class AccountMoveLine(models.Model):
+    _inherit = "account.move.line"
+
+    @api.onchange(
+        "product_id",
+        "quantity",
+        "price_unit",
+        "discount",
+        "tax_ids",
+    )
+    def _onchange_l10n_ar_rg5329_line_fields(self):
+        for line in self:
+            if line.move_id:
+                line.move_id._l10n_ar_rg5329_sync_invoice_taxes()
