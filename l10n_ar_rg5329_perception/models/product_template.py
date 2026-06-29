@@ -23,9 +23,8 @@ class ProductTemplate(models.Model):
             for template in self.sudo():
                 old_rate_by_company[template.id] = {}
                 for company in companies:
-                    taxes = (
+                    taxes = company._l10n_ar_rg5329_base_taxes(
                         template.with_company(company).taxes_id
-                        - company._l10n_ar_rg5329_perception_taxes()
                     )
                     old_rate_by_company[template.id][company.id] = company._l10n_ar_rg5329_rate_key_from_taxes(taxes)
 
@@ -40,9 +39,8 @@ class ProductTemplate(models.Model):
             for company in companies:
                 templates_to_sync = self.sudo().browse()
                 for template in self.sudo():
-                    taxes = (
+                    taxes = company._l10n_ar_rg5329_base_taxes(
                         template.with_company(company).taxes_id
-                        - company._l10n_ar_rg5329_perception_taxes()
                     )
                     new_rate_key = company._l10n_ar_rg5329_rate_key_from_taxes(taxes)
                     old_rate_key = old_rate_by_company.get(template.id, {}).get(company.id)
@@ -61,7 +59,6 @@ class ProductTemplate(models.Model):
             return
 
         company = company.sudo()
-        perception_taxes = company._l10n_ar_rg5329_perception_taxes()
         tax_by_rate = company._l10n_ar_rg5329_perception_tax_by_rate()
         reached_category_ids = company._l10n_ar_rg5329_reached_category_ids()
         all_company_ids = self.env["res.company"].sudo().search([]).ids
@@ -72,7 +69,7 @@ class ProductTemplate(models.Model):
         )
 
         for template in self.sudo().with_company(company).with_context(context):
-            taxes = template.taxes_id - perception_taxes
+            taxes = company._l10n_ar_rg5329_base_taxes(template.taxes_id)
             should_apply = (
                 company._l10n_ar_rg5329_has_required_configuration()
                 and template.categ_id.id in reached_category_ids

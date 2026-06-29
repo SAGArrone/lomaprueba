@@ -4,6 +4,20 @@ from odoo.tools import float_compare
 from .res_company import RG5329_TAX_SPECS
 
 
+RG5329_LEGAL_INVOICE_DOCUMENT_CODES = {
+    "1",
+    "6",
+    "11",
+    "19",
+    "20",
+    "21",
+    "51",
+    "201",
+    "206",
+    "211",
+}
+
+
 class AccountMove(models.Model):
     _inherit = "account.move"
 
@@ -21,7 +35,9 @@ class AccountMove(models.Model):
             "partner_id",
             "move_type",
             "company_id",
+            "journal_id",
             "fiscal_position_id",
+            "l10n_latam_document_type_id",
         }
         if watched_fields.intersection(vals) and not self.env.context.get(
             "l10n_ar_rg5329_skip_invoice_sync"
@@ -39,7 +55,9 @@ class AccountMove(models.Model):
         "partner_id",
         "move_type",
         "company_id",
+        "journal_id",
         "fiscal_position_id",
+        "l10n_latam_document_type_id",
     )
     def _onchange_l10n_ar_rg5329_sync_invoice_taxes(self):
         self._l10n_ar_rg5329_sync_invoice_taxes()
@@ -50,9 +68,34 @@ class AccountMove(models.Model):
         return (
             self.state == "draft"
             and self.move_type == "out_invoice"
-            and company.l10n_ar_rg5329_enabled
+            and company._l10n_ar_rg5329_has_required_configuration()
             and company._l10n_ar_rg5329_is_partner_reached(self.partner_id)
+            and self._l10n_ar_rg5329_has_legal_document()
         )
+
+    def _l10n_ar_rg5329_has_legal_document(self):
+        self.ensure_one()
+        journal = self.journal_id
+        document_type = self.l10n_latam_document_type_id
+
+        if self.company_id.account_fiscal_country_id.code != "AR":
+            return False
+        if not (
+            self.l10n_latam_use_documents
+            and journal
+            and journal.type == "sale"
+            and journal.l10n_latam_use_documents
+            and journal.l10n_ar_is_pos
+            and journal.l10n_ar_afip_pos_system
+            and document_type
+        ):
+            return False
+
+        internal_type = getattr(document_type, "internal_type", False)
+        if internal_type:
+            return internal_type == "invoice"
+
+        return document_type.code in RG5329_LEGAL_INVOICE_DOCUMENT_CODES
 
     def _l10n_ar_rg5329_base_by_rate(self):
         self.ensure_one()
@@ -63,7 +106,9 @@ class AccountMove(models.Model):
         for line in self.invoice_line_ids.filtered(lambda item: not item.display_type):
             if not line.product_id or line.product_id.categ_id.id not in reached_category_ids:
                 continue
-            rate_key = company._l10n_ar_rg5329_rate_key_from_taxes(line.tax_ids)
+            rate_key = company._l10n_ar_rg5329_rate_key_from_taxes(
+                company._l10n_ar_rg5329_base_taxes(line.tax_ids)
+            )
             if rate_key and self._l10n_ar_rg5329_line_product_has_perception(
                 line,
                 tax_by_rate.get(rate_key),
@@ -115,16 +160,14 @@ class AccountMove(models.Model):
                 continue
 
             company = move.company_id
-            perception_taxes = company._l10n_ar_rg5329_perception_taxes()
             if company.l10n_ar_rg5329_enabled:
                 company._l10n_ar_rg5329_ensure_taxes()
-                perception_taxes = company._l10n_ar_rg5329_perception_taxes()
             tax_by_rate = company._l10n_ar_rg5329_perception_tax_by_rate()
             reached_category_ids = company._l10n_ar_rg5329_reached_category_ids()
             applicable_rate_keys = move._l10n_ar_rg5329_applicable_rate_keys()
 
             for line in move.invoice_line_ids.filtered(lambda item: not item.display_type):
-                taxes = line.tax_ids - perception_taxes
+                taxes = company._l10n_ar_rg5329_base_taxes(line.tax_ids)
                 should_apply = (
                     applicable_rate_keys
                     and line.product_id

@@ -94,8 +94,7 @@ class ResCompany(models.Model):
             and not self.env.context.get("l10n_ar_rg5329_skip_apply")
         ):
             for company in self:
-                if company._l10n_ar_rg5329_has_required_configuration():
-                    company._l10n_ar_rg5329_apply_configuration()
+                company._l10n_ar_rg5329_apply_configuration()
 
         return res
 
@@ -110,13 +109,15 @@ class ResCompany(models.Model):
                 )
             company._l10n_ar_rg5329_ensure_taxes()
             company._l10n_ar_rg5329_sync_products()
+            company._l10n_ar_rg5329_sync_draft_invoices()
         return True
 
     def _l10n_ar_rg5329_apply_configuration(self):
         for company in self:
             if company._l10n_ar_rg5329_has_required_configuration():
                 company._l10n_ar_rg5329_ensure_taxes()
-                company._l10n_ar_rg5329_sync_products()
+            company._l10n_ar_rg5329_sync_products()
+            company._l10n_ar_rg5329_sync_draft_invoices()
 
     def _l10n_ar_rg5329_tax_values(self, rate_key):
         self.ensure_one()
@@ -154,11 +155,23 @@ class ResCompany(models.Model):
 
     def _l10n_ar_rg5329_find_tax(self, rate_key):
         self.ensure_one()
-        return self.env["account.tax"].sudo().with_company(self).search(
+        tax = self.env["account.tax"].sudo().with_company(self).search(
             [
                 ("company_id", "=", self.id),
                 ("l10n_ar_rg5329_perception", "=", True),
                 ("l10n_ar_rg5329_vat_rate", "=", rate_key),
+                ("type_tax_use", "=", "sale"),
+                ("active", "in", [True, False]),
+            ],
+            limit=1,
+        )
+        if tax:
+            return tax
+
+        return self.env["account.tax"].sudo().with_company(self).search(
+            [
+                ("company_id", "=", self.id),
+                ("name", "=", RG5329_TAX_SPECS[rate_key]["name"]),
                 ("type_tax_use", "=", "sale"),
                 ("active", "in", [True, False]),
             ],
@@ -180,6 +193,12 @@ class ResCompany(models.Model):
                         company._l10n_ar_rg5329_tax_values(rate_key)
                     )
                     continue
+
+                tax.write({
+                    "active": True,
+                    "l10n_ar_rg5329_perception": True,
+                    "l10n_ar_rg5329_vat_rate": rate_key,
+                })
 
                 move_line_count = MoveLine.search_count([
                     "|",
@@ -213,10 +232,13 @@ class ResCompany(models.Model):
 
     def _l10n_ar_rg5329_perception_taxes(self):
         self.ensure_one()
+        tax_names = [spec["name"] for spec in RG5329_TAX_SPECS.values()]
         return self.env["account.tax"].sudo().with_company(self).search(
             [
                 ("company_id", "=", self.id),
+                "|",
                 ("l10n_ar_rg5329_perception", "=", True),
+                ("name", "in", tax_names),
                 ("active", "=", True),
             ]
         )
@@ -270,9 +292,24 @@ class ResCompany(models.Model):
 
         return False
 
+    def _l10n_ar_rg5329_base_taxes(self, taxes):
+        self.ensure_one()
+        return taxes - self._l10n_ar_rg5329_perception_taxes()
+
     def _l10n_ar_rg5329_sync_products(self):
         ProductTemplate = self.env["product.template"].sudo()
 
         for company in self:
             templates = ProductTemplate.with_company(company).search([])
             templates._l10n_ar_rg5329_sync_perception_taxes(company)
+
+    def _l10n_ar_rg5329_sync_draft_invoices(self):
+        Move = self.env["account.move"].sudo()
+
+        for company in self:
+            moves = Move.with_company(company).search([
+                ("company_id", "=", company.id),
+                ("move_type", "=", "out_invoice"),
+                ("state", "=", "draft"),
+            ])
+            moves._l10n_ar_rg5329_sync_invoice_taxes()
