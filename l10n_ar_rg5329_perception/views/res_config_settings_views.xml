@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="res_config_settings_view_form_l10n_ar_rg5329" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.l10n.ar.rg5329</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="account.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//app[@name='account']" position="inside">
+                <block title="Localizacion Argentina" name="l10n_ar_rg5329_localization">
+                    <setting
+                        id="l10n_ar_rg5329_setting"
+                        string="Percepcion IVA RG 5329/2023"
+                        help="Permite habilitar el regimen de percepcion de IVA para bienes alcanzados por la RG 5329/2023."
+                    >
+                        <field name="l10n_ar_rg5329_enabled"/>
+                        <div class="content-group" invisible="not l10n_ar_rg5329_enabled">
+                            <div class="row mt16">
+                                <label for="l10n_ar_rg5329_account_id" class="col-lg-4 o_light_label"/>
+                                <field
+                                    name="l10n_ar_rg5329_account_id"
+                                    required="l10n_ar_rg5329_enabled"
+                                    options="{'no_create_edit': False}"
+                                />
+                            </div>
+                            <div class="row">
+                                <label for="l10n_ar_rg5329_tax_group_id" class="col-lg-4 o_light_label"/>
+                                <field
+                                    name="l10n_ar_rg5329_tax_group_id"
+                                    required="l10n_ar_rg5329_enabled"
+                                    options="{'no_create_edit': False}"
+                                />
+                            </div>
+                            <div class="row">
+                                <label for="l10n_ar_rg5329_min_amount" class="col-lg-4 o_light_label"/>
+                                <field name="l10n_ar_rg5329_min_amount"/>
+                            </div>
+                            <div class="row">
+                                <label for="l10n_ar_rg5329_responsibility_type_ids" class="col-lg-4 o_light_label"/>
+                                <field
+                                    name="l10n_ar_rg5329_responsibility_type_ids"
+                                    widget="many2many_tags"
+                                    options="{'no_create': True}"
+                                />
+                            </div>
+                            <div class="row">
+                                <label for="l10n_ar_rg5329_product_categ_ids" class="col-lg-4 o_light_label"/>
+                                <field
+                                    name="l10n_ar_rg5329_product_categ_ids"
+                                    widget="many2many_tags"
+                                    options="{'no_create_edit': False}"
+                                />
+                            </div>
+                        </div>
+                    </setting>
+                </block>
+            </xpath>
+        </field>
+    </record>
+</odoo>
+
