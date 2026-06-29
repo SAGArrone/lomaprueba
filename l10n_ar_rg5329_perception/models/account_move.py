@@ -65,8 +65,9 @@ class AccountMove(models.Model):
     def _l10n_ar_rg5329_can_apply(self):
         self.ensure_one()
         company = self.company_id
+        state = self.state or "draft"
         return (
-            self.state == "draft"
+            state == "draft"
             and self.move_type == "out_invoice"
             and company._l10n_ar_rg5329_has_required_configuration()
             and company._l10n_ar_rg5329_is_partner_reached(self.partner_id)
@@ -77,16 +78,16 @@ class AccountMove(models.Model):
         self.ensure_one()
         journal = self.journal_id
         document_type = self.l10n_latam_document_type_id
+        journal_uses_documents = getattr(journal, "l10n_latam_use_documents", False)
+        journal_is_pos = getattr(journal, "l10n_ar_is_pos", False)
 
         if self.company_id.account_fiscal_country_id.code != "AR":
             return False
         if not (
-            self.l10n_latam_use_documents
-            and journal
+            journal
             and journal.type == "sale"
-            and journal.l10n_latam_use_documents
-            and journal.l10n_ar_is_pos
-            and journal.l10n_ar_afip_pos_system
+            and journal_uses_documents
+            and journal_is_pos
             and document_type
         ):
             return False
@@ -147,7 +148,8 @@ class AccountMove(models.Model):
 
     def _l10n_ar_rg5329_sync_invoice_taxes(self):
         for move in self:
-            if move.state != "draft" or move.move_type != "out_invoice":
+            state = move.state or "draft"
+            if state != "draft" or move.move_type != "out_invoice":
                 continue
 
             company = move.company_id
@@ -182,6 +184,12 @@ class AccountMove(models.Model):
 class AccountMoveLine(models.Model):
     _inherit = "account.move.line"
 
+    def _compute_tax_ids(self):
+        res = super()._compute_tax_ids()
+        if not self.env.context.get("l10n_ar_rg5329_skip_invoice_sync"):
+            self._l10n_ar_rg5329_sync_parent_invoices()
+        return res
+
     @api.model_create_multi
     def create(self, vals_list):
         lines = super().create(vals_list)
@@ -211,6 +219,7 @@ class AccountMoveLine(models.Model):
 
     def _l10n_ar_rg5329_sync_parent_invoices(self):
         moves = self.mapped("move_id").filtered(
-            lambda move: move.state == "draft" and move.move_type == "out_invoice"
+            lambda move: (move.state or "draft") == "draft"
+            and move.move_type == "out_invoice"
         )
         moves._l10n_ar_rg5329_sync_invoice_taxes()
