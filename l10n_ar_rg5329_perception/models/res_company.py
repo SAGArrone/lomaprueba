@@ -27,6 +27,7 @@ class ResCompany(models.Model):
         comodel_name="account.account",
         string="Cuenta percepcion RG 5329",
         domain="[('deprecated', '=', False)]",
+        check_company=True,
     )
     l10n_ar_rg5329_tax_group_id = fields.Many2one(
         comodel_name="account.tax.group",
@@ -60,25 +61,25 @@ class ResCompany(models.Model):
             limit=1,
         )
 
-    @api.constrains(
-        "l10n_ar_rg5329_enabled",
-        "l10n_ar_rg5329_account_id",
-        "l10n_ar_rg5329_tax_group_id",
-        "l10n_ar_rg5329_min_amount",
-    )
-    def _check_l10n_ar_rg5329_configuration(self):
+    @api.constrains("l10n_ar_rg5329_min_amount")
+    def _check_l10n_ar_rg5329_min_amount(self):
         for company in self:
             if company.l10n_ar_rg5329_min_amount < 0:
-                raise ValidationError(_("El importe minimo de percepcion no puede ser negativo."))
-            if not company.l10n_ar_rg5329_enabled:
-                continue
-            if not company.l10n_ar_rg5329_account_id:
-                raise ValidationError(_("Debe configurar la cuenta contable de percepcion RG 5329."))
-            if not company.l10n_ar_rg5329_tax_group_id:
-                raise ValidationError(_("Debe configurar el grupo de impuestos RG 5329."))
+                raise ValidationError(
+                    _("El importe minimo de percepcion no puede ser negativo.")
+                )
+
+    def _l10n_ar_rg5329_has_required_configuration(self):
+        self.ensure_one()
+        return bool(
+            self.l10n_ar_rg5329_enabled
+            and self.l10n_ar_rg5329_account_id
+            and self.l10n_ar_rg5329_tax_group_id
+        )
 
     def write(self, vals):
         res = super().write(vals)
+
         watched_fields = {
             "l10n_ar_rg5329_enabled",
             "l10n_ar_rg5329_account_id",
@@ -87,15 +88,22 @@ class ResCompany(models.Model):
             "l10n_ar_rg5329_responsibility_type_ids",
             "l10n_ar_rg5329_product_categ_ids",
         }
-        if watched_fields.intersection(vals) and not self.env.context.get("l10n_ar_rg5329_skip_apply"):
-            self._l10n_ar_rg5329_apply_configuration()
+
+        if (
+            watched_fields.intersection(vals)
+            and not self.env.context.get("l10n_ar_rg5329_skip_apply")
+        ):
+            for company in self:
+                if company._l10n_ar_rg5329_has_required_configuration():
+                    company._l10n_ar_rg5329_apply_configuration()
+
         return res
 
     def _l10n_ar_rg5329_apply_configuration(self):
         for company in self:
-            if company.l10n_ar_rg5329_enabled:
+            if company._l10n_ar_rg5329_has_required_configuration():
                 company._l10n_ar_rg5329_ensure_taxes()
-            company._l10n_ar_rg5329_sync_products()
+                company._l10n_ar_rg5329_sync_products()
 
     def _l10n_ar_rg5329_tax_values(self, rate_key):
         self.ensure_one()
@@ -138,12 +146,15 @@ class ResCompany(models.Model):
         self.ensure_one()
         spec = RG5329_TAX_SPECS[rate_key]
         Tax = self.env["account.tax"].sudo().with_company(self)
-        domain = [
-            ("company_id", "=", self.id),
-            ("l10n_ar_rg5329_perception", "=", True),
-            ("l10n_ar_rg5329_vat_rate", "=", rate_key),
-        ]
-        tax = Tax.search(domain, limit=1)
+
+        tax = Tax.search(
+            [
+                ("company_id", "=", self.id),
+                ("l10n_ar_rg5329_perception", "=", True),
+                ("l10n_ar_rg5329_vat_rate", "=", rate_key),
+            ],
+            limit=1,
+        )
         if tax:
             return tax
 
@@ -167,9 +178,12 @@ class ResCompany(models.Model):
 
     def _l10n_ar_rg5329_ensure_taxes(self):
         for company in self:
-            company._check_l10n_ar_rg5329_configuration()
+            if not company._l10n_ar_rg5329_has_required_configuration():
+                continue
+
             for rate_key in RG5329_TAX_SPECS:
                 tax = company._l10n_ar_rg5329_find_tax(rate_key)
+
                 if not tax:
                     self.env["account.tax"].sudo().with_company(company).create(
                         company._l10n_ar_rg5329_tax_values(rate_key)
@@ -199,19 +213,20 @@ class ResCompany(models.Model):
 
     def _l10n_ar_rg5329_perception_taxes(self):
         self.ensure_one()
-        taxes = self.env["account.tax"].sudo().with_company(self).search(
+        return self.env["account.tax"].sudo().with_company(self).search(
             [
                 ("company_id", "=", self.id),
                 ("l10n_ar_rg5329_perception", "=", True),
             ]
         )
-        return taxes
 
     def _l10n_ar_rg5329_perception_tax_by_rate(self):
         self.ensure_one()
         taxes = self._l10n_ar_rg5329_perception_taxes()
         return {
-            rate_key: taxes.filtered(lambda tax, key=rate_key: tax.l10n_ar_rg5329_vat_rate == key)[:1]
+            rate_key: taxes.filtered(
+                lambda tax, key=rate_key: tax.l10n_ar_rg5329_vat_rate == key
+            )[:1]
             for rate_key in RG5329_TAX_SPECS
         }
 
@@ -220,6 +235,7 @@ class ResCompany(models.Model):
         categories = self.l10n_ar_rg5329_product_categ_ids
         if not categories:
             return set()
+
         reached_categories = self.env["product.category"].sudo().search(
             [("id", "child_of", categories.ids)]
         )
@@ -229,12 +245,17 @@ class ResCompany(models.Model):
         self.ensure_one()
         if not partner or not self.l10n_ar_rg5329_responsibility_type_ids:
             return False
+
         partner = partner.commercial_partner_id or partner
         responsibility = partner.l10n_ar_afip_responsibility_type_id
-        return bool(responsibility and responsibility in self.l10n_ar_rg5329_responsibility_type_ids)
+        return bool(
+            responsibility
+            and responsibility in self.l10n_ar_rg5329_responsibility_type_ids
+        )
 
     def _l10n_ar_rg5329_rate_key_from_taxes(self, taxes):
         taxes = taxes.filtered(lambda tax: not tax.l10n_ar_rg5329_perception)
+
         for rate_key, spec in RG5329_TAX_SPECS.items():
             matched = taxes.filtered(
                 lambda tax, amount=spec["vat_amount"]: tax.amount_type == "percent"
@@ -243,11 +264,12 @@ class ResCompany(models.Model):
             )
             if matched:
                 return rate_key
+
         return False
 
     def _l10n_ar_rg5329_sync_products(self):
         ProductTemplate = self.env["product.template"].sudo()
+
         for company in self:
             templates = ProductTemplate.with_company(company).search([])
             templates._l10n_ar_rg5329_sync_perception_taxes(company)
-
