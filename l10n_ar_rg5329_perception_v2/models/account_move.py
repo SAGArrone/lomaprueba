@@ -1,4 +1,5 @@
-from odoo import api, fields, models
+from odoo import Command, api, fields, models
+from odoo.exceptions import ValidationError
 from odoo.tools import float_compare
 
 from .res_company import RG5329_TAX_SPECS
@@ -6,34 +7,6 @@ from .res_company import RG5329_TAX_SPECS
 
 class AccountMove(models.Model):
     _inherit = "account.move"
-
-    @api.model_create_multi
-    def create(self, vals_list):
-        moves = super().create(vals_list)
-        if not self.env.context.get("l10n_ar_rg5329_skip_invoice_sync"):
-            moves._l10n_ar_rg5329_sync_invoice_taxes()
-        return moves
-
-    def write(self, vals):
-        res = super().write(vals)
-        watched_fields = {
-            "invoice_line_ids",
-            "partner_id",
-            "move_type",
-            "company_id",
-            "fiscal_position_id",
-            "invoice_date",
-            "currency_id",
-        }
-        if watched_fields.intersection(vals) and not self.env.context.get(
-            "l10n_ar_rg5329_skip_invoice_sync"
-        ):
-            self._l10n_ar_rg5329_sync_invoice_taxes()
-        return res
-
-    def action_post(self):
-        self._l10n_ar_rg5329_sync_invoice_taxes()
-        return super().action_post()
 
     @api.onchange(
         "invoice_line_ids",
@@ -46,65 +19,81 @@ class AccountMove(models.Model):
         "move_type",
         "company_id",
         "fiscal_position_id",
-        "invoice_date",
-        "currency_id",
     )
     def _onchange_l10n_ar_rg5329_sync_invoice_taxes(self):
-        if not self.env.context.get("l10n_ar_rg5329_skip_invoice_sync"):
+        self._l10n_ar_rg5329_sync_invoice_taxes()
+
+    def write(self, vals):
+        res = super().write(vals)
+        watched_fields = {
+            "invoice_line_ids",
+            "partner_id",
+            "move_type",
+            "company_id",
+            "fiscal_position_id",
+        }
+        if watched_fields.intersection(vals) and not self.env.context.get(
+            "l10n_ar_rg5329_skip_invoice_sync"
+        ):
             self._l10n_ar_rg5329_sync_invoice_taxes()
+        return res
+
+    def action_post(self):
+        self._l10n_ar_rg5329_sync_invoice_taxes()
+        return super().action_post()
 
     def _l10n_ar_rg5329_can_apply(self):
         self.ensure_one()
         company = self.company_id
-        return bool(
+        return (
             self.state == "draft"
             and self.move_type == "out_invoice"
-            and company._l10n_ar_rg5329_has_required_configuration()
+            and company.l10n_ar_rg5329_enabled
             and company._l10n_ar_rg5329_is_partner_reached(self.partner_id)
         )
-
-    def _l10n_ar_rg5329_line_base_amount(self, line):
-        self.ensure_one()
-        if line.price_subtotal:
-            return line.price_subtotal
-        quantity = line.quantity or 0.0
-        price_unit = line.price_unit or 0.0
-        discount = line.discount or 0.0
-        return quantity * price_unit * (1.0 - discount / 100.0)
 
     def _l10n_ar_rg5329_base_by_rate(self):
         self.ensure_one()
         company = self.company_id
         reached_category_ids = company._l10n_ar_rg5329_reached_category_ids()
         perception_taxes = company._l10n_ar_rg5329_perception_taxes()
+
         bases = {rate_key: 0.0 for rate_key in RG5329_TAX_SPECS}
 
-        for line in self.invoice_line_ids.filtered(lambda item: not item.display_type):
+        for line in self.invoice_line_ids.filtered(lambda l: not l.display_type):
             if not line.product_id:
                 continue
+
             if line.product_id.categ_id.id not in reached_category_ids:
                 continue
 
             taxes_without_perception = line.tax_ids - perception_taxes
-            rate_key = company._l10n_ar_rg5329_rate_key_from_taxes(taxes_without_perception)
+            rate_key = company._l10n_ar_rg5329_rate_key_from_taxes(
+                taxes_without_perception
+            )
+
             if rate_key:
-                bases[rate_key] += self._l10n_ar_rg5329_line_base_amount(line)
+                bases[rate_key] += line.price_subtotal
+
         return bases
 
     def _l10n_ar_rg5329_applicable_rate_keys(self):
         self.ensure_one()
+
         if not self._l10n_ar_rg5329_can_apply():
             return set()
 
         invoice_currency = self.currency_id or self.company_currency_id
         company_currency = self.company_id.currency_id
         conversion_date = self.invoice_date or fields.Date.context_today(self)
+
         applicable = set()
 
         for rate_key, base in self._l10n_ar_rg5329_base_by_rate().items():
             perception_amount = invoice_currency.round(
                 base * RG5329_TAX_SPECS[rate_key]["amount"] / 100.0
             )
+
             perception_amount_company = company_currency.round(
                 invoice_currency._convert(
                     perception_amount,
@@ -113,6 +102,7 @@ class AccountMove(models.Model):
                     conversion_date,
                 )
             )
+
             if (
                 float_compare(
                     perception_amount_company,
@@ -122,70 +112,66 @@ class AccountMove(models.Model):
                 > 0
             ):
                 applicable.add(rate_key)
+
         return applicable
 
     def _l10n_ar_rg5329_sync_invoice_taxes(self):
         for move in self:
-            if move.move_type != "out_invoice" or move.state != "draft":
+            if move.move_type != "out_invoice":
                 continue
 
             company = move.company_id
+            perception_taxes = company._l10n_ar_rg5329_perception_taxes()
+
             if company.l10n_ar_rg5329_enabled:
                 company._l10n_ar_rg5329_ensure_taxes()
+                perception_taxes = company._l10n_ar_rg5329_perception_taxes()
 
-            perception_taxes = company._l10n_ar_rg5329_perception_taxes()
             tax_by_rate = company._l10n_ar_rg5329_perception_tax_by_rate()
             reached_category_ids = company._l10n_ar_rg5329_reached_category_ids()
             applicable_rate_keys = move._l10n_ar_rg5329_applicable_rate_keys()
-            can_apply = move._l10n_ar_rg5329_can_apply()
 
-            for line in move.invoice_line_ids.filtered(lambda item: not item.display_type):
-                # Always start by removing RG 5329 perceptions from the line.
-                # Then add back only the one that is legally applicable.
-                taxes = line.tax_ids - perception_taxes
+            for line in move.invoice_line_ids.filtered(lambda l: not l.display_type):
+                taxes_without_perception = line.tax_ids - perception_taxes
+                rate_key = company._l10n_ar_rg5329_rate_key_from_taxes(
+                    taxes_without_perception
+                )
 
-                if can_apply and line.product_id and line.product_id.categ_id.id in reached_category_ids:
-                    rate_key = company._l10n_ar_rg5329_rate_key_from_taxes(taxes)
+                raise ValidationError(
+                    "DEBUG RG5329\n"
+                    f"Regimen habilitado: {company.l10n_ar_rg5329_enabled}\n"
+                    f"Cliente: {move.partner_id.display_name}\n"
+                    f"Responsabilidad cliente: "
+                    f"{move.partner_id.commercial_partner_id.l10n_ar_afip_responsibility_type_id.display_name}\n"
+                    f"Cliente alcanzado: {company._l10n_ar_rg5329_is_partner_reached(move.partner_id)}\n"
+                    f"Categorias configuradas: {company.l10n_ar_rg5329_product_categ_ids.mapped('display_name')}\n"
+                    f"Categoria producto: {line.product_id.categ_id.display_name}\n"
+                    f"Categoria ID producto: {line.product_id.categ_id.id}\n"
+                    f"Categorias alcanzadas IDs: {company._l10n_ar_rg5329_reached_category_ids()}\n"
+                    f"Impuestos linea: {line.tax_ids.mapped('name')}\n"
+                    f"Impuestos sin RG: {taxes_without_perception.mapped('name')}\n"
+                    f"Rate detectado: {rate_key}\n"
+                    f"Base linea: {line.price_subtotal}\n"
+                    f"Bases por tasa: {move._l10n_ar_rg5329_base_by_rate()}\n"
+                    f"Rate keys aplicables: {applicable_rate_keys}\n"
+                    f"Impuestos RG: {company._l10n_ar_rg5329_perception_taxes().mapped('name')}\n"
+                    f"Tax by rate: { {k: v.mapped('name') for k, v in tax_by_rate.items()} }"
+                )
+
+                taxes = taxes_without_perception
+
+                should_apply = (
+                    move._l10n_ar_rg5329_can_apply()
+                    and line.product_id
+                    and line.product_id.categ_id.id in reached_category_ids
+                )
+
+                if should_apply and rate_key:
                     perception_tax = tax_by_rate.get(rate_key)
                     if rate_key in applicable_rate_keys and perception_tax:
                         taxes |= perception_tax
 
                 if set(taxes.ids) != set(line.tax_ids.ids):
-                    line.with_context(l10n_ar_rg5329_skip_invoice_sync=True).update(
-                        {"tax_ids": [(6, 0, taxes.ids)]}
-                    )
-
-
-class AccountMoveLine(models.Model):
-    _inherit = "account.move.line"
-
-    @api.model_create_multi
-    def create(self, vals_list):
-        lines = super().create(vals_list)
-        if not self.env.context.get("l10n_ar_rg5329_skip_invoice_sync"):
-            lines.mapped("move_id")._l10n_ar_rg5329_sync_invoice_taxes()
-        return lines
-
-    def write(self, vals):
-        res = super().write(vals)
-        watched_fields = {
-            "product_id",
-            "quantity",
-            "price_unit",
-            "discount",
-            "tax_ids",
-            "display_type",
-        }
-        if watched_fields.intersection(vals) and not self.env.context.get(
-            "l10n_ar_rg5329_skip_invoice_sync"
-        ):
-            self.mapped("move_id")._l10n_ar_rg5329_sync_invoice_taxes()
-        return res
-
-    @api.onchange("product_id", "quantity", "price_unit", "discount", "tax_ids")
-    def _onchange_l10n_ar_rg5329_line_sync_invoice_taxes(self):
-        if self.env.context.get("l10n_ar_rg5329_skip_invoice_sync"):
-            return
-        for line in self:
-            if line.move_id:
-                line.move_id._l10n_ar_rg5329_sync_invoice_taxes()
+                    line.with_context(
+                        l10n_ar_rg5329_skip_invoice_sync=True
+                    ).tax_ids = taxes
