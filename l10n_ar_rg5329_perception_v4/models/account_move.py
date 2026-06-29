@@ -41,6 +41,24 @@ class AccountMove(models.Model):
         self._l10n_ar_rg5329_sync_invoice_taxes()
         return super().action_post()
 
+    def _l10n_ar_rg5329_invoice_product_lines(self):
+        self.ensure_one()
+
+        lines = self.invoice_line_ids.filtered(
+            lambda line: not line.display_type and line.product_id
+        )
+
+        if not lines:
+            lines = self.line_ids.filtered(
+                lambda line: (
+                    not line.display_type
+                    and line.product_id
+                    and not line.tax_line_id
+                )
+            )
+
+        return lines
+
     def _l10n_ar_rg5329_can_apply(self):
         self.ensure_one()
         company = self.company_id
@@ -59,16 +77,21 @@ class AccountMove(models.Model):
 
         bases = {rate_key: 0.0 for rate_key in RG5329_TAX_SPECS}
 
-        for line in self.invoice_line_ids.filtered(lambda l: not l.display_type):
-            if not line.product_id:
-                continue
-
+        for line in self._l10n_ar_rg5329_invoice_product_lines():
             if line.product_id.categ_id.id not in reached_category_ids:
                 continue
 
             taxes_without_perception = line.tax_ids - perception_taxes
             rate_key = company._l10n_ar_rg5329_rate_key_from_taxes(
                 taxes_without_perception
+            )
+
+            _logger.info(
+                "RG5329 base line: product=%s subtotal=%s taxes=%s rate_key=%s",
+                line.product_id.display_name,
+                line.price_subtotal,
+                taxes_without_perception.mapped("name"),
+                rate_key,
             )
 
             if rate_key:
@@ -92,7 +115,6 @@ class AccountMove(models.Model):
             perception_amount = invoice_currency.round(
                 base * RG5329_TAX_SPECS[rate_key]["amount"] / 100.0
             )
-
             perception_amount_company = company_currency.round(
                 invoice_currency._convert(
                     perception_amount,
@@ -155,16 +177,16 @@ class AccountMove(models.Model):
             )
             _logger.info("Minimo percepcion: %s", company.l10n_ar_rg5329_min_amount)
 
-            perception_taxes = company._l10n_ar_rg5329_perception_taxes()
-
             if company.l10n_ar_rg5329_enabled:
                 company._l10n_ar_rg5329_ensure_taxes()
-                perception_taxes = company._l10n_ar_rg5329_perception_taxes()
 
+            perception_taxes = company._l10n_ar_rg5329_perception_taxes()
             tax_by_rate = company._l10n_ar_rg5329_perception_tax_by_rate()
             reached_category_ids = company._l10n_ar_rg5329_reached_category_ids()
             applicable_rate_keys = move._l10n_ar_rg5329_applicable_rate_keys()
+            product_lines = move._l10n_ar_rg5329_invoice_product_lines()
 
+            _logger.info("Cantidad lineas producto: %s", len(product_lines))
             _logger.info(
                 "Impuestos RG encontrados: %s",
                 perception_taxes.mapped("name"),
@@ -175,7 +197,7 @@ class AccountMove(models.Model):
             )
             _logger.info("Rate keys aplicables: %s", applicable_rate_keys)
 
-            for line in move.invoice_line_ids.filtered(lambda l: not l.display_type):
+            for line in product_lines:
                 taxes = line.tax_ids - perception_taxes
                 rate_key = company._l10n_ar_rg5329_rate_key_from_taxes(taxes)
 
@@ -197,7 +219,6 @@ class AccountMove(models.Model):
 
                 should_apply = (
                     move._l10n_ar_rg5329_can_apply()
-                    and line.product_id
                     and line.product_id.categ_id.id in reached_category_ids
                 )
 
