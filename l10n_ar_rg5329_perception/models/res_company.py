@@ -26,7 +26,7 @@ class ResCompany(models.Model):
     l10n_ar_rg5329_account_id = fields.Many2one(
         comodel_name="account.account",
         string="Cuenta percepcion RG 5329",
-        domain="[('deprecated', '=', False)]",
+        domain="[('deprecated', '=', False), ('company_ids', 'in', [id])]",
         check_company=True,
     )
     l10n_ar_rg5329_tax_group_id = fields.Many2one(
@@ -65,9 +65,7 @@ class ResCompany(models.Model):
     def _check_l10n_ar_rg5329_min_amount(self):
         for company in self:
             if company.l10n_ar_rg5329_min_amount < 0:
-                raise ValidationError(
-                    _("El importe minimo de percepcion no puede ser negativo.")
-                )
+                raise ValidationError(_("El importe minimo de percepcion no puede ser negativo."))
 
     def _l10n_ar_rg5329_has_required_configuration(self):
         self.ensure_one()
@@ -79,7 +77,6 @@ class ResCompany(models.Model):
 
     def write(self, vals):
         res = super().write(vals)
-
         watched_fields = {
             "l10n_ar_rg5329_enabled",
             "l10n_ar_rg5329_account_id",
@@ -88,17 +85,19 @@ class ResCompany(models.Model):
             "l10n_ar_rg5329_responsibility_type_ids",
             "l10n_ar_rg5329_product_categ_ids",
         }
-
-        if (
-            watched_fields.intersection(vals)
-            and not self.env.context.get("l10n_ar_rg5329_skip_apply")
-        ):
+        if watched_fields.intersection(vals) and not self.env.context.get("l10n_ar_rg5329_skip_apply"):
             for company in self:
-                company._l10n_ar_rg5329_apply_configuration()
-
+                if company._l10n_ar_rg5329_has_required_configuration():
+                    company._l10n_ar_rg5329_ensure_taxes()
         return res
 
     def action_l10n_ar_rg5329_sync_products(self):
+        """Manual button: clean RG5329 taxes from products.
+
+        The perception is dynamic in invoices. Products must keep only their regular VAT
+        and other taxes. This avoids charging RG5329 to non-reached partners or below
+        the legal minimum.
+        """
         for company in self:
             if not company._l10n_ar_rg5329_has_required_configuration():
                 raise ValidationError(
@@ -109,21 +108,12 @@ class ResCompany(models.Model):
                 )
             company._l10n_ar_rg5329_ensure_taxes()
             company._l10n_ar_rg5329_sync_products()
-            company._l10n_ar_rg5329_sync_draft_invoices()
         return True
-
-    def _l10n_ar_rg5329_apply_configuration(self):
-        for company in self:
-            if company._l10n_ar_rg5329_has_required_configuration():
-                company._l10n_ar_rg5329_ensure_taxes()
-            company._l10n_ar_rg5329_sync_products()
-            company._l10n_ar_rg5329_sync_draft_invoices()
 
     def _l10n_ar_rg5329_tax_values(self, rate_key):
         self.ensure_one()
         spec = RG5329_TAX_SPECS[rate_key]
         account = self.l10n_ar_rg5329_account_id
-
         return {
             "name": spec["name"],
             "amount_type": "percent",
@@ -137,25 +127,29 @@ class ResCompany(models.Model):
             "l10n_ar_rg5329_vat_rate": rate_key,
             "invoice_repartition_line_ids": [
                 Command.create({"repartition_type": "base", "factor_percent": 100.0}),
-                Command.create({
-                    "repartition_type": "tax",
-                    "factor_percent": 100.0,
-                    "account_id": account.id,
-                }),
+                Command.create(
+                    {
+                        "repartition_type": "tax",
+                        "factor_percent": 100.0,
+                        "account_id": account.id,
+                    }
+                ),
             ],
             "refund_repartition_line_ids": [
                 Command.create({"repartition_type": "base", "factor_percent": 100.0}),
-                Command.create({
-                    "repartition_type": "tax",
-                    "factor_percent": 100.0,
-                    "account_id": account.id,
-                }),
+                Command.create(
+                    {
+                        "repartition_type": "tax",
+                        "factor_percent": 100.0,
+                        "account_id": account.id,
+                    }
+                ),
             ],
         }
 
     def _l10n_ar_rg5329_find_tax(self, rate_key):
         self.ensure_one()
-        tax = self.env["account.tax"].sudo().with_company(self).search(
+        return self.env["account.tax"].sudo().with_company(self).search(
             [
                 ("company_id", "=", self.id),
                 ("l10n_ar_rg5329_perception", "=", True),
@@ -165,80 +159,65 @@ class ResCompany(models.Model):
             ],
             limit=1,
         )
-        if tax:
-            return tax
 
-        return self.env["account.tax"].sudo().with_company(self).search(
-            [
-                ("company_id", "=", self.id),
-                ("name", "=", RG5329_TAX_SPECS[rate_key]["name"]),
-                ("type_tax_use", "=", "sale"),
-                ("active", "in", [True, False]),
-            ],
-            limit=1,
+    def _l10n_ar_rg5329_tax_is_used(self, tax):
+        if not tax:
+            return False
+        return bool(
+            self.env["account.move.line"].sudo().search_count(
+                [
+                    "|",
+                    ("tax_line_id", "=", tax.id),
+                    ("tax_ids", "in", tax.id),
+                ]
+            )
         )
 
     def _l10n_ar_rg5329_ensure_taxes(self):
-        MoveLine = self.env["account.move.line"].sudo()
-
         for company in self:
             if not company._l10n_ar_rg5329_has_required_configuration():
                 continue
 
             for rate_key in RG5329_TAX_SPECS:
                 tax = company._l10n_ar_rg5329_find_tax(rate_key)
-
                 if not tax:
                     self.env["account.tax"].sudo().with_company(company).create(
                         company._l10n_ar_rg5329_tax_values(rate_key)
                     )
                     continue
 
-                tax.write({
-                    "active": True,
-                    "l10n_ar_rg5329_perception": True,
-                    "l10n_ar_rg5329_vat_rate": rate_key,
-                })
-
-                move_line_count = MoveLine.search_count([
-                    "|",
-                    ("tax_line_id", "=", tax.id),
-                    ("tax_ids", "in", tax.id),
-                ])
-
-                if move_line_count:
+                # Odoo blocks changing computation fields of taxes already used in entries.
+                # If the tax was already used, keep it as-is and only reuse it.
+                if company._l10n_ar_rg5329_tax_is_used(tax):
                     continue
 
                 spec = RG5329_TAX_SPECS[rate_key]
-                tax.write({
-                    "name": spec["name"],
-                    "amount_type": "percent",
-                    "amount": spec["amount"],
-                    "type_tax_use": "sale",
-                    "tax_group_id": company.l10n_ar_rg5329_tax_group_id.id,
-                    "price_include": False,
-                    "include_base_amount": False,
-                    "l10n_ar_rg5329_perception": True,
-                    "l10n_ar_rg5329_vat_rate": rate_key,
-                })
-
+                tax.write(
+                    {
+                        "name": spec["name"],
+                        "amount_type": "percent",
+                        "amount": spec["amount"],
+                        "type_tax_use": "sale",
+                        "tax_group_id": company.l10n_ar_rg5329_tax_group_id.id,
+                        "price_include": False,
+                        "include_base_amount": False,
+                        "l10n_ar_rg5329_perception": True,
+                        "l10n_ar_rg5329_vat_rate": rate_key,
+                    }
+                )
                 tax.invoice_repartition_line_ids.filtered(
                     lambda line: line.repartition_type == "tax"
                 ).write({"account_id": company.l10n_ar_rg5329_account_id.id})
-
                 tax.refund_repartition_line_ids.filtered(
                     lambda line: line.repartition_type == "tax"
                 ).write({"account_id": company.l10n_ar_rg5329_account_id.id})
 
     def _l10n_ar_rg5329_perception_taxes(self):
         self.ensure_one()
-        tax_names = [spec["name"] for spec in RG5329_TAX_SPECS.values()]
         return self.env["account.tax"].sudo().with_company(self).search(
             [
                 ("company_id", "=", self.id),
-                "|",
                 ("l10n_ar_rg5329_perception", "=", True),
-                ("name", "in", tax_names),
                 ("active", "=", True),
             ]
         )
@@ -256,10 +235,8 @@ class ResCompany(models.Model):
     def _l10n_ar_rg5329_reached_category_ids(self):
         self.ensure_one()
         categories = self.l10n_ar_rg5329_product_categ_ids
-
         if not categories:
-            return set()
-
+            return set(self.env["product.category"].sudo().search([]).ids)
         reached_categories = self.env["product.category"].sudo().search(
             [("id", "child_of", categories.ids)]
         )
@@ -269,18 +246,14 @@ class ResCompany(models.Model):
         self.ensure_one()
         if not partner or not self.l10n_ar_rg5329_responsibility_type_ids:
             return False
-
         partner = partner.commercial_partner_id or partner
         responsibility = partner.l10n_ar_afip_responsibility_type_id
-
         return bool(
-            responsibility
-            and responsibility in self.l10n_ar_rg5329_responsibility_type_ids
+            responsibility and responsibility in self.l10n_ar_rg5329_responsibility_type_ids
         )
 
     def _l10n_ar_rg5329_rate_key_from_taxes(self, taxes):
         taxes = taxes.filtered(lambda tax: not tax.l10n_ar_rg5329_perception)
-
         for rate_key, spec in RG5329_TAX_SPECS.items():
             matched = taxes.filtered(
                 lambda tax, amount=spec["vat_amount"]: tax.amount_type == "percent"
@@ -289,27 +262,19 @@ class ResCompany(models.Model):
             )
             if matched:
                 return rate_key
-
         return False
-
-    def _l10n_ar_rg5329_base_taxes(self, taxes):
-        self.ensure_one()
-        return taxes - self._l10n_ar_rg5329_perception_taxes()
 
     def _l10n_ar_rg5329_sync_products(self):
         ProductTemplate = self.env["product.template"].sudo()
-
         for company in self:
-            templates = ProductTemplate.with_company(company).search([])
-            templates._l10n_ar_rg5329_sync_perception_taxes(company)
-
-    def _l10n_ar_rg5329_sync_draft_invoices(self):
-        Move = self.env["account.move"].sudo()
-
-        for company in self:
-            moves = Move.with_company(company).search([
-                ("company_id", "=", company.id),
-                ("move_type", "=", "out_invoice"),
-                ("state", "=", "draft"),
-            ])
-            moves._l10n_ar_rg5329_sync_invoice_taxes()
+            perception_taxes = company._l10n_ar_rg5329_perception_taxes()
+            if not perception_taxes:
+                continue
+            templates = ProductTemplate.with_company(company).search(
+                [("taxes_id", "in", perception_taxes.ids)]
+            )
+            for template in templates:
+                taxes = template.with_company(company).taxes_id - perception_taxes
+                template.with_company(company).with_context(
+                    l10n_ar_rg5329_skip_product_sync=True
+                ).write({"taxes_id": [Command.set(taxes.ids)]})

@@ -2,26 +2,23 @@
 
 Modulo Odoo 19 para habilitar opcionalmente el regimen de percepcion IVA RG 5329/2023 desde Contabilidad.
 
-## Configuracion
+## Funcionamiento
 
-Ir a Contabilidad > Configuracion > Ajustes > Localizacion Argentina y activar "Percepcion IVA RG 5329/2023".
+El modulo no usa `post_init_hook`: al instalar no modifica impuestos ni productos. Solo comienza a funcionar cuando se habilita desde Ajustes de Contabilidad.
 
-Campos principales:
+La percepcion RG 5329 no se graba en productos. Se calcula dinamicamente en facturas de cliente, porque depende de:
 
-- Cuenta contable de percepcion.
-- Grupo de impuestos.
-- Importe minimo de percepcion, por defecto 3000.
-- Tipos de contribuyentes alcanzados.
-- Categorias de productos alcanzadas.
+- responsabilidad fiscal del cliente;
+- categorias de productos alcanzadas;
+- alicuota de IVA de cada linea;
+- importe minimo de percepcion configurado.
 
-Al habilitar el regimen se crean, si no existen, los impuestos de venta RG 5329 del 3% y 1,5%.
-
-## Criterio de calculo
-
-El modulo agrega o quita la percepcion en las lineas de factura segun la base agregada por alicuota:
+## Criterio
 
 - IVA 21%: percepcion 3%.
 - IVA 10,5%: percepcion 1,5%.
+- Solo aplica cuando la percepcion calculada supera el minimo configurado.
+- Si no se configuran categorias, se consideran alcanzados todos los productos.
+- Si el cliente no esta alcanzado, se eliminan percepciones RG 5329 de las lineas.
 
-La percepcion solo se mantiene en la factura si el importe calculado supera el minimo configurado para la compania.
-
+El boton de configuracion limpia percepciones RG 5329 que hayan quedado cargadas en productos de versiones anteriores.
