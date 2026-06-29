@@ -109,18 +109,9 @@ class AccountMove(models.Model):
             rate_key = company._l10n_ar_rg5329_rate_key_from_taxes(
                 company._l10n_ar_rg5329_base_taxes(line.tax_ids)
             )
-            if rate_key and self._l10n_ar_rg5329_line_product_has_perception(
-                line,
-                tax_by_rate.get(rate_key),
-            ):
+            if rate_key and tax_by_rate.get(rate_key):
                 bases[rate_key] += line.price_subtotal
         return bases
-
-    def _l10n_ar_rg5329_line_product_has_perception(self, line, perception_tax):
-        self.ensure_one()
-        if not perception_tax or not line.product_id:
-            return False
-        return perception_tax in line.product_id.taxes_id
 
     def _l10n_ar_rg5329_applicable_rate_keys(self):
         self.ensure_one()
@@ -179,7 +170,6 @@ class AccountMove(models.Model):
                     if (
                         rate_key in applicable_rate_keys
                         and perception_tax
-                        and move._l10n_ar_rg5329_line_product_has_perception(line, perception_tax)
                     ):
                         taxes |= tax_by_rate[rate_key]
 
