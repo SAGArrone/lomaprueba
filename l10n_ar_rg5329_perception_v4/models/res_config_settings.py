@@ -1,5 +1,4 @@
-from odoo import _, fields, models
-from odoo.exceptions import ValidationError
+from odoo import fields, models
 
 
 class ResConfigSettings(models.TransientModel):
@@ -30,13 +29,6 @@ class ResConfigSettings(models.TransientModel):
         readonly=False,
     )
 
-    def set_values(self):
-        res = super().set_values()
-        company = self.company_id.sudo()
-        if company.l10n_ar_rg5329_enabled:
-            if not company.l10n_ar_rg5329_account_id:
-                raise ValidationError(_("Debe configurar la cuenta contable de percepcion RG 5329."))
-            if not company.l10n_ar_rg5329_tax_group_id:
-                raise ValidationError(_("Debe configurar el grupo de impuestos RG 5329."))
-            company._l10n_ar_rg5329_ensure_taxes()
-        return res
+    def action_l10n_ar_rg5329_sync_products(self):
+        self.ensure_one()
+        return self.company_id.action_l10n_ar_rg5329_sync_products()
