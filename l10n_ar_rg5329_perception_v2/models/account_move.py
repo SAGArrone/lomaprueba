@@ -31,6 +31,10 @@ class AccountMove(models.Model):
             self._l10n_ar_rg5329_sync_invoice_taxes()
         return res
 
+    def action_post(self):
+        self._l10n_ar_rg5329_sync_invoice_taxes()
+        return super().action_post()
+
     @api.onchange(
         "invoice_line_ids",
         "invoice_line_ids.product_id",
@@ -46,7 +50,8 @@ class AccountMove(models.Model):
         "currency_id",
     )
     def _onchange_l10n_ar_rg5329_sync_invoice_taxes(self):
-        self._l10n_ar_rg5329_sync_invoice_taxes()
+        if not self.env.context.get("l10n_ar_rg5329_skip_invoice_sync"):
+            self._l10n_ar_rg5329_sync_invoice_taxes()
 
     def _l10n_ar_rg5329_can_apply(self):
         self.ensure_one()
@@ -57,6 +62,15 @@ class AccountMove(models.Model):
             and company._l10n_ar_rg5329_has_required_configuration()
             and company._l10n_ar_rg5329_is_partner_reached(self.partner_id)
         )
+
+    def _l10n_ar_rg5329_line_base_amount(self, line):
+        self.ensure_one()
+        if line.price_subtotal:
+            return line.price_subtotal
+        quantity = line.quantity or 0.0
+        price_unit = line.price_unit or 0.0
+        discount = line.discount or 0.0
+        return quantity * price_unit * (1.0 - discount / 100.0)
 
     def _l10n_ar_rg5329_base_by_rate(self):
         self.ensure_one()
@@ -70,10 +84,11 @@ class AccountMove(models.Model):
                 continue
             if line.product_id.categ_id.id not in reached_category_ids:
                 continue
+
             taxes_without_perception = line.tax_ids - perception_taxes
             rate_key = company._l10n_ar_rg5329_rate_key_from_taxes(taxes_without_perception)
             if rate_key:
-                bases[rate_key] += line.price_subtotal
+                bases[rate_key] += self._l10n_ar_rg5329_line_base_amount(line)
         return bases
 
     def _l10n_ar_rg5329_applicable_rate_keys(self):
@@ -125,6 +140,8 @@ class AccountMove(models.Model):
             can_apply = move._l10n_ar_rg5329_can_apply()
 
             for line in move.invoice_line_ids.filtered(lambda item: not item.display_type):
+                # Always start by removing RG 5329 perceptions from the line.
+                # Then add back only the one that is legally applicable.
                 taxes = line.tax_ids - perception_taxes
 
                 if can_apply and line.product_id and line.product_id.categ_id.id in reached_category_ids:
@@ -134,4 +151,41 @@ class AccountMove(models.Model):
                         taxes |= perception_tax
 
                 if set(taxes.ids) != set(line.tax_ids.ids):
-                    line.with_context(l10n_ar_rg5329_skip_invoice_sync=True).tax_ids = taxes
+                    line.with_context(l10n_ar_rg5329_skip_invoice_sync=True).update(
+                        {"tax_ids": [(6, 0, taxes.ids)]}
+                    )
+
+
+class AccountMoveLine(models.Model):
+    _inherit = "account.move.line"
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        lines = super().create(vals_list)
+        if not self.env.context.get("l10n_ar_rg5329_skip_invoice_sync"):
+            lines.mapped("move_id")._l10n_ar_rg5329_sync_invoice_taxes()
+        return lines
+
+    def write(self, vals):
+        res = super().write(vals)
+        watched_fields = {
+            "product_id",
+            "quantity",
+            "price_unit",
+            "discount",
+            "tax_ids",
+            "display_type",
+        }
+        if watched_fields.intersection(vals) and not self.env.context.get(
+            "l10n_ar_rg5329_skip_invoice_sync"
+        ):
+            self.mapped("move_id")._l10n_ar_rg5329_sync_invoice_taxes()
+        return res
+
+    @api.onchange("product_id", "quantity", "price_unit", "discount", "tax_ids")
+    def _onchange_l10n_ar_rg5329_line_sync_invoice_taxes(self):
+        if self.env.context.get("l10n_ar_rg5329_skip_invoice_sync"):
+            return
+        for line in self:
+            if line.move_id:
+                line.move_id._l10n_ar_rg5329_sync_invoice_taxes()

@@ -1,5 +1,5 @@
 {
-    "name": "Argentina - Percepcion IVA RG 5329/2023V2",
+    "name": "Argentina - Percepcion IVA RG 5329/2023",
     "summary": "Regimen opcional de percepcion IVA RG 5329/2023",
     "version": "19.0.1.0.0",
     "category": "Accounting/Localizations",
