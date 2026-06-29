@@ -234,16 +234,13 @@ class ResCompany(models.Model):
         self.ensure_one()
         categories = self.l10n_ar_rg5329_product_categ_ids
 
-        # Si no se configuraron categorias, se consideran alcanzadas todas.
         if not categories:
-            return set(
-                self.env["product.category"].sudo().search([]).ids
-            )
+            return set(self.env["product.category"].sudo().search([]).ids)
 
-    reached_categories = self.env["product.category"].sudo().search(
-        [("id", "child_of", categories.ids)]
-    )
-    return set(reached_categories.ids)
+        reached_categories = self.env["product.category"].sudo().search(
+            [("id", "child_of", categories.ids)]
+        )
+        return set(reached_categories.ids)
 
     def _l10n_ar_rg5329_is_partner_reached(self, partner):
         self.ensure_one()
@@ -277,3 +274,4 @@ class ResCompany(models.Model):
         for company in self:
             templates = ProductTemplate.with_company(company).search([])
             templates._l10n_ar_rg5329_sync_perception_taxes(company)
+   
