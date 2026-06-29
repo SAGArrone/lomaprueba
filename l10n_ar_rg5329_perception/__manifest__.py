@@ -9,8 +9,6 @@
     "data": [
         "views/res_config_settings_views.xml",
     ],
-    "post_init_hook": "_post_init_l10n_ar_rg5329",
     "installable": True,
     "application": False,
 }
-
