@@ -43,11 +43,9 @@ class AccountMove(models.Model):
 
     def _l10n_ar_rg5329_invoice_product_lines(self):
         self.ensure_one()
-
         lines = self.invoice_line_ids.filtered(
             lambda line: not line.display_type and line.product_id
         )
-
         if not lines:
             lines = self.line_ids.filtered(
                 lambda line: (
@@ -56,7 +54,6 @@ class AccountMove(models.Model):
                     and not line.tax_line_id
                 )
             )
-
         return lines
 
     def _l10n_ar_rg5329_can_apply(self):
@@ -74,7 +71,6 @@ class AccountMove(models.Model):
         company = self.company_id
         reached_category_ids = company._l10n_ar_rg5329_reached_category_ids()
         perception_taxes = company._l10n_ar_rg5329_perception_taxes()
-
         bases = {rate_key: 0.0 for rate_key in RG5329_TAX_SPECS}
 
         for line in self._l10n_ar_rg5329_invoice_product_lines():
@@ -84,14 +80,6 @@ class AccountMove(models.Model):
             taxes_without_perception = line.tax_ids - perception_taxes
             rate_key = company._l10n_ar_rg5329_rate_key_from_taxes(
                 taxes_without_perception
-            )
-
-            _logger.info(
-                "RG5329 base line: product=%s subtotal=%s taxes=%s rate_key=%s",
-                line.product_id.display_name,
-                line.price_subtotal,
-                taxes_without_perception.mapped("name"),
-                rate_key,
             )
 
             if rate_key:
@@ -125,10 +113,9 @@ class AccountMove(models.Model):
             )
 
             _logger.info(
-                "RG5329 base/rate: rate_key=%s base=%s perception=%s perception_company=%s min=%s",
+                "RG5329 MOVE base/rate: rate_key=%s base=%s perception=%s min=%s",
                 rate_key,
                 base,
-                perception_amount,
                 perception_amount_company,
                 self.company_id.l10n_ar_rg5329_min_amount,
             )
@@ -152,31 +139,6 @@ class AccountMove(models.Model):
 
             company = move.company_id
 
-            _logger.info("========== RG5329 ==========")
-            _logger.info("Factura: %s", move.name or "Nueva")
-            _logger.info("Estado: %s", move.state)
-            _logger.info("Tipo: %s", move.move_type)
-            _logger.info("Cliente: %s", move.partner_id.display_name)
-            _logger.info("Empresa: %s", company.display_name)
-            _logger.info("Regimen habilitado: %s", company.l10n_ar_rg5329_enabled)
-            _logger.info(
-                "Responsabilidad cliente: %s",
-                move.partner_id.commercial_partner_id.l10n_ar_afip_responsibility_type_id.display_name,
-            )
-            _logger.info(
-                "Cliente alcanzado: %s",
-                company._l10n_ar_rg5329_is_partner_reached(move.partner_id),
-            )
-            _logger.info(
-                "Categorias configuradas: %s",
-                company.l10n_ar_rg5329_product_categ_ids.mapped("display_name"),
-            )
-            _logger.info(
-                "Categorias alcanzadas IDs: %s",
-                company._l10n_ar_rg5329_reached_category_ids(),
-            )
-            _logger.info("Minimo percepcion: %s", company.l10n_ar_rg5329_min_amount)
-
             if company.l10n_ar_rg5329_enabled:
                 company._l10n_ar_rg5329_ensure_taxes()
 
@@ -186,58 +148,41 @@ class AccountMove(models.Model):
             applicable_rate_keys = move._l10n_ar_rg5329_applicable_rate_keys()
             product_lines = move._l10n_ar_rg5329_invoice_product_lines()
 
+            _logger.info("========== RG5329 MOVE ==========")
+            _logger.info("Factura: %s", move.name or "Nueva")
+            _logger.info("Cliente: %s", move.partner_id.display_name)
+            _logger.info("Regimen habilitado: %s", company.l10n_ar_rg5329_enabled)
+            _logger.info(
+                "Cliente alcanzado: %s",
+                company._l10n_ar_rg5329_is_partner_reached(move.partner_id),
+            )
             _logger.info("Cantidad lineas producto: %s", len(product_lines))
-            _logger.info(
-                "Impuestos RG encontrados: %s",
-                perception_taxes.mapped("name"),
-            )
-            _logger.info(
-                "Tax by rate: %s",
-                {k: v.mapped("name") for k, v in tax_by_rate.items()},
-            )
             _logger.info("Rate keys aplicables: %s", applicable_rate_keys)
 
             for line in product_lines:
                 taxes = line.tax_ids - perception_taxes
                 rate_key = company._l10n_ar_rg5329_rate_key_from_taxes(taxes)
 
-                _logger.info("--------------------------------")
-                _logger.info("Producto: %s", line.product_id.display_name)
-                _logger.info(
-                    "Categoria: %s (%s)",
-                    line.product_id.categ_id.display_name,
-                    line.product_id.categ_id.id,
-                )
-                _logger.info("Subtotal: %s", line.price_subtotal)
-                _logger.info("Impuestos originales: %s", line.tax_ids.mapped("name"))
-                _logger.info("Impuestos sin RG: %s", taxes.mapped("name"))
-                _logger.info("IVA detectado: %s", rate_key)
-                _logger.info(
-                    "Categoria incluida: %s",
-                    line.product_id.categ_id.id in reached_category_ids,
-                )
-
                 should_apply = (
                     move._l10n_ar_rg5329_can_apply()
+                    and line.product_id
                     and line.product_id.categ_id.id in reached_category_ids
                 )
 
-                _logger.info("Debe aplicar por condiciones base: %s", should_apply)
+                _logger.info(
+                    "RG5329 MOVE LINE product=%s subtotal=%s taxes=%s rate=%s should_apply=%s",
+                    line.product_id.display_name,
+                    line.price_subtotal,
+                    taxes.mapped("name"),
+                    rate_key,
+                    should_apply,
+                )
 
                 if should_apply:
                     perception_tax = tax_by_rate.get(rate_key)
-                    _logger.info(
-                        "Impuesto percepcion para rate_key: %s",
-                        perception_tax.mapped("name") if perception_tax else "NINGUNO",
-                    )
-
                     if rate_key in applicable_rate_keys and perception_tax:
-                        _logger.info(">>> AGREGO PERCEPCION RG5329 <<<")
+                        _logger.info("RG5329 MOVE >>> AGREGO %s", perception_tax.name)
                         taxes |= perception_tax
-                    else:
-                        _logger.info(">>> NO AGREGO PERCEPCION RG5329 <<<")
-
-                _logger.info("Impuestos finales: %s", taxes.mapped("name"))
 
                 if set(taxes.ids) != set(line.tax_ids.ids):
                     line.with_context(
@@ -257,5 +202,81 @@ class AccountMoveLine(models.Model):
     )
     def _onchange_l10n_ar_rg5329_line_fields(self):
         for line in self:
-            if line.move_id:
-                line.move_id._l10n_ar_rg5329_sync_invoice_taxes()
+            move = line.move_id
+
+            if not move or move.move_type != "out_invoice":
+                continue
+
+            company = move.company_id
+
+            if company.l10n_ar_rg5329_enabled:
+                company._l10n_ar_rg5329_ensure_taxes()
+
+            perception_taxes = company._l10n_ar_rg5329_perception_taxes()
+            taxes = line.tax_ids - perception_taxes
+
+            _logger.info("========== RG5329 LINE ==========")
+            _logger.info("Producto: %s", line.product_id.display_name)
+            _logger.info("Cliente: %s", move.partner_id.display_name)
+            _logger.info("Regimen habilitado: %s", company.l10n_ar_rg5329_enabled)
+            _logger.info(
+                "Cliente alcanzado: %s",
+                company._l10n_ar_rg5329_is_partner_reached(move.partner_id),
+            )
+            _logger.info("Subtotal linea: %s", line.price_subtotal)
+            _logger.info("Impuestos sin RG: %s", taxes.mapped("name"))
+
+            if not (
+                move.state == "draft"
+                and company.l10n_ar_rg5329_enabled
+                and company._l10n_ar_rg5329_is_partner_reached(move.partner_id)
+                and line.product_id
+                and line.product_id.categ_id.id
+                in company._l10n_ar_rg5329_reached_category_ids()
+            ):
+                _logger.info("RG5329 LINE >>> NO APLICA POR CONDICIONES BASE")
+                line.tax_ids = taxes
+                continue
+
+            rate_key = company._l10n_ar_rg5329_rate_key_from_taxes(taxes)
+
+            _logger.info("IVA detectado: %s", rate_key)
+
+            if not rate_key:
+                _logger.info("RG5329 LINE >>> NO APLICA, NO DETECTA IVA")
+                line.tax_ids = taxes
+                continue
+
+            base = line.price_subtotal
+            perception_amount = base * RG5329_TAX_SPECS[rate_key]["amount"] / 100.0
+
+            _logger.info(
+                "Base: %s | Alicuota RG: %s | Percepcion: %s | Minimo: %s",
+                base,
+                RG5329_TAX_SPECS[rate_key]["amount"],
+                perception_amount,
+                company.l10n_ar_rg5329_min_amount,
+            )
+
+            if (
+                float_compare(
+                    perception_amount,
+                    company.l10n_ar_rg5329_min_amount,
+                    precision_rounding=move.currency_id.rounding,
+                )
+                <= 0
+            ):
+                _logger.info("RG5329 LINE >>> NO APLICA POR MINIMO")
+                line.tax_ids = taxes
+                continue
+
+            perception_tax = company._l10n_ar_rg5329_perception_tax_by_rate().get(
+                rate_key
+            )
+
+            if perception_tax:
+                _logger.info("RG5329 LINE >>> AGREGO %s", perception_tax.name)
+                line.tax_ids = taxes | perception_tax
+            else:
+                _logger.info("RG5329 LINE >>> NO ENCONTRO IMPUESTO RG")
+                line.tax_ids = taxes
