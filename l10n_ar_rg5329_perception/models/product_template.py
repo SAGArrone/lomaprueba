@@ -74,7 +74,7 @@ class ProductTemplate(models.Model):
         for template in self.sudo().with_company(company).with_context(context):
             taxes = template.taxes_id - perception_taxes
             should_apply = (
-                company.l10n_ar_rg5329_enabled
+                company._l10n_ar_rg5329_has_required_configuration()
                 and template.categ_id.id in reached_category_ids
             )
             if should_apply:

@@ -233,13 +233,17 @@ class ResCompany(models.Model):
     def _l10n_ar_rg5329_reached_category_ids(self):
         self.ensure_one()
         categories = self.l10n_ar_rg5329_product_categ_ids
-        if not categories:
-            return set()
 
-        reached_categories = self.env["product.category"].sudo().search(
-            [("id", "child_of", categories.ids)]
-        )
-        return set(reached_categories.ids)
+        # Si no se configuraron categorias, se consideran alcanzadas todas.
+        if not categories:
+            return set(
+                self.env["product.category"].sudo().search([]).ids
+            )
+
+    reached_categories = self.env["product.category"].sudo().search(
+        [("id", "child_of", categories.ids)]
+    )
+    return set(reached_categories.ids)
 
     def _l10n_ar_rg5329_is_partner_reached(self, partner):
         self.ensure_one()
