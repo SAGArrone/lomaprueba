@@ -10,7 +10,16 @@ _logger = logging.getLogger(__name__)
 
 
 RG5329_LEGAL_INVOICE_DOCUMENT_CODES = {
-    "1", "6", "11", "19", "20", "21", "51", "201", "206", "211",
+    "1",
+    "6",
+    "11",
+    "19",
+    "20",
+    "21",
+    "51",
+    "201",
+    "206",
+    "211",
 }
 
 
@@ -37,7 +46,9 @@ class AccountMove(models.Model):
             "invoice_date",
             "currency_id",
         }
-        if watched_fields.intersection(vals) and not self.env.context.get("l10n_ar_rg5329_skip_invoice_sync"):
+        if watched_fields.intersection(vals) and not self.env.context.get(
+            "l10n_ar_rg5329_skip_invoice_sync"
+        ):
             self._l10n_ar_rg5329_sync_invoice_taxes()
         return res
 
@@ -66,7 +77,6 @@ class AccountMove(models.Model):
 
         if self.company_id.account_fiscal_country_id.code != "AR":
             return False
-
         if not (
             journal
             and journal.type == "sale"
@@ -85,8 +95,7 @@ class AccountMove(models.Model):
     def _l10n_ar_rg5329_can_apply(self):
         self.ensure_one()
         company = self.company_id
-
-        return (
+        return bool(
             (self.state or "draft") == "draft"
             and self.move_type == "out_invoice"
             and company.l10n_ar_rg5329_enabled
@@ -101,11 +110,40 @@ class AccountMove(models.Model):
             and "RG 5329" not in (tax.name or "")
         )
 
-    def _l10n_ar_rg5329_invoice_lines(self):
+    def _l10n_ar_rg5329_invoice_base_lines(self):
+        """Return invoice base lines in a way that is robust in Odoo 19.
+
+        In the form/onchange cycle, Odoo may have the edited invoice rows in
+        line_ids before invoice_line_ids is fully synchronized. For that reason
+        we inspect both recordsets and keep only commercial/base lines.
+        """
         self.ensure_one()
-        return self.invoice_line_ids.filtered(
-            lambda line: not line.display_type and not line.tax_line_id
+        candidate_lines = self.invoice_line_ids | self.line_ids
+
+        def _is_base_line(line):
+            if line.display_type or line.tax_line_id:
+                return False
+
+            account_type = getattr(line.account_id, "account_type", False)
+            if account_type in ("asset_receivable", "liability_payable"):
+                return False
+
+            return bool(
+                line.product_id
+                or line.tax_ids
+                or line.quantity
+                or line.price_unit
+                or line.price_subtotal
+            )
+
+        lines = candidate_lines.filtered(_is_base_line)
+        _logger.info(
+            "RG5329 V5.1 LINEAS DETECTADAS invoice_line_ids=%s line_ids=%s base=%s",
+            len(self.invoice_line_ids),
+            len(self.line_ids),
+            len(lines),
         )
+        return lines
 
     def _l10n_ar_rg5329_line_base_amount(self, line):
         if line.quantity and line.price_unit:
@@ -118,10 +156,11 @@ class AccountMove(models.Model):
             return False
         return product.categ_id.id in reached_category_ids
 
-    def _l10n_ar_rg5329_lines_by_rate(self):
+    def _l10n_ar_rg5329_collect_by_rate(self, lines=None):
         self.ensure_one()
         company = self.company_id
         reached_category_ids = company._l10n_ar_rg5329_reached_category_ids()
+        lines = lines if lines is not None else self._l10n_ar_rg5329_invoice_base_lines()
 
         result = {
             rate_key: {
@@ -131,40 +170,36 @@ class AccountMove(models.Model):
             for rate_key in RG5329_TAX_SPECS
         }
 
-        for line in self._l10n_ar_rg5329_invoice_lines():
+        for line in lines:
             clean_taxes = self._l10n_ar_rg5329_clean_taxes(line.tax_ids)
-
             if not self._l10n_ar_rg5329_line_is_reached(line, reached_category_ids):
                 continue
-
             rate_key = company._l10n_ar_rg5329_rate_key_from_taxes(clean_taxes)
             if not rate_key:
                 continue
-
             result[rate_key]["base"] += self._l10n_ar_rg5329_line_base_amount(line)
             result[rate_key]["lines"] |= line
 
+        _logger.info(
+            "RG5329 V5.1 BASES ACUMULADAS POR ALICUOTA: %s",
+            {key: value["base"] for key, value in result.items()},
+        )
         return result
 
-    def _l10n_ar_rg5329_applicable_rate_keys(self, lines_by_rate):
+    def _l10n_ar_rg5329_applicable_rate_keys(self, grouped_lines):
         self.ensure_one()
-
         invoice_currency = self.currency_id or self.company_currency_id
         company_currency = self.company_id.currency_id
         conversion_date = self.invoice_date or fields.Date.context_today(self)
-
         applicable = set()
 
-        for rate_key, data in lines_by_rate.items():
+        for rate_key, data in grouped_lines.items():
             base = data["base"]
-
             if not base:
                 continue
-
             perception_amount = invoice_currency.round(
                 base * RG5329_TAX_SPECS[rate_key]["amount"] / 100.0
             )
-
             perception_amount_company = company_currency.round(
                 invoice_currency._convert(
                     perception_amount,
@@ -173,15 +208,13 @@ class AccountMove(models.Model):
                     conversion_date,
                 )
             )
-
             _logger.info(
-                "RG5329 CHECK rate=%s base_acumulada=%s percepcion=%s minimo=%s",
+                "RG5329 V5.1 CHECK rate=%s base_acumulada=%s percepcion_moneda_compania=%s minimo=%s",
                 rate_key,
                 base,
                 perception_amount_company,
                 self.company_id.l10n_ar_rg5329_min_amount,
             )
-
             if (
                 float_compare(
                     perception_amount_company,
@@ -192,58 +225,55 @@ class AccountMove(models.Model):
             ):
                 applicable.add(rate_key)
 
+        _logger.info("RG5329 V5.1 ALICUOTAS APLICABLES: %s", applicable)
         return applicable
 
     def _l10n_ar_rg5329_sync_invoice_taxes(self):
         for move in self:
             if move.move_type != "out_invoice" or (move.state or "draft") != "draft":
                 continue
+            if move.env.context.get("l10n_ar_rg5329_skip_invoice_sync"):
+                continue
 
             company = move.company_id
-
             if company.l10n_ar_rg5329_enabled:
                 company._l10n_ar_rg5329_ensure_taxes()
 
-            tax_by_rate = company._l10n_ar_rg5329_perception_tax_by_rate()
-            invoice_lines = move._l10n_ar_rg5329_invoice_lines()
-
-            if not invoice_lines:
+            lines = move._l10n_ar_rg5329_invoice_base_lines()
+            if not lines:
+                _logger.info("RG5329 V5.1: factura sin lineas base para evaluar")
                 continue
 
             if not move._l10n_ar_rg5329_can_apply():
-                for line in invoice_lines:
+                _logger.info("RG5329 V5.1: condiciones generales no alcanzadas, limpio percepciones")
+                for line in lines:
                     clean_taxes = move._l10n_ar_rg5329_clean_taxes(line.tax_ids)
                     if set(clean_taxes.ids) != set(line.tax_ids.ids):
                         line.with_context(l10n_ar_rg5329_skip_invoice_sync=True).tax_ids = clean_taxes
                 continue
 
-            lines_by_rate = move._l10n_ar_rg5329_lines_by_rate()
-            applicable_rate_keys = move._l10n_ar_rg5329_applicable_rate_keys(lines_by_rate)
+            tax_by_rate = company._l10n_ar_rg5329_perception_tax_by_rate()
+            grouped_lines = move._l10n_ar_rg5329_collect_by_rate(lines=lines)
+            applicable_rate_keys = move._l10n_ar_rg5329_applicable_rate_keys(grouped_lines)
 
-            _logger.info("RG5329 ALICUOTAS APLICABLES: %s", applicable_rate_keys)
-
-            for rate_key, data in lines_by_rate.items():
+            reached_lines = self.env["account.move.line"]
+            for rate_key, data in grouped_lines.items():
+                reached_lines |= data["lines"]
                 perception_tax = tax_by_rate.get(rate_key)
-                affected_lines = data["lines"]
-
-                for line in affected_lines:
+                for line in data["lines"]:
                     taxes = move._l10n_ar_rg5329_clean_taxes(line.tax_ids)
-
                     if rate_key in applicable_rate_keys and perception_tax:
                         taxes |= perception_tax
-
                     if set(taxes.ids) != set(line.tax_ids.ids):
                         line.with_context(l10n_ar_rg5329_skip_invoice_sync=True).tax_ids = taxes
 
-            reached_lines = self.env["account.move.line"]
-            for data in lines_by_rate.values():
-                reached_lines |= data["lines"]
-
-            not_reached_lines = invoice_lines - reached_lines
+            # Las lineas no alcanzadas o sin IVA 21/10,5 deben quedar sin percepcion RG 5329.
+            not_reached_lines = lines - reached_lines
             for line in not_reached_lines:
                 clean_taxes = move._l10n_ar_rg5329_clean_taxes(line.tax_ids)
                 if set(clean_taxes.ids) != set(line.tax_ids.ids):
                     line.with_context(l10n_ar_rg5329_skip_invoice_sync=True).tax_ids = clean_taxes
+
 
 class AccountMoveLine(models.Model):
     _inherit = "account.move.line"
@@ -256,12 +286,11 @@ class AccountMoveLine(models.Model):
         "tax_ids",
     )
     def _onchange_l10n_ar_rg5329_line_fields(self):
-        for line in self:
-            move = line.move_id
-            if (
-                move
-                and move.move_type == "out_invoice"
-                and (move.state or "draft") == "draft"
-                and not self.env.context.get("l10n_ar_rg5329_skip_invoice_sync")
-            ):
-                move._l10n_ar_rg5329_sync_invoice_taxes()
+        # Este onchange no decide por linea. Solo fuerza el recalculo centralizado del account.move.
+        if self.env.context.get("l10n_ar_rg5329_skip_invoice_sync"):
+            return
+        moves = self.mapped("move_id").filtered(
+            lambda move: move.move_type == "out_invoice"
+            and (move.state or "draft") == "draft"
+        )
+        moves._l10n_ar_rg5329_sync_invoice_taxes()
