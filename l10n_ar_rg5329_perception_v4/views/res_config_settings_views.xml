@@ -5,57 +5,70 @@
         <field name="model">res.config.settings</field>
         <field name="inherit_id" ref="account.res_config_settings_view_form"/>
         <field name="arch" type="xml">
-            <xpath expr="//app[@name='account']" position="inside">
-                <block title="Localizacion para Argentina" name="l10n_ar_rg5329_localization">
-                    <setting
-                        id="l10n_ar_rg5329_setting"
-                        string="Percepcion IVA RG 5329/2023"
-                        help="Permite habilitar el regimen de percepcion de IVA para bienes alcanzados por la RG 5329/2023.">
-                        <field name="l10n_ar_rg5329_enabled"/>
-                        <div class="content-group" invisible="not l10n_ar_rg5329_enabled">
-                            <div class="row mt16">
-                                <label for="l10n_ar_rg5329_account_id" class="col-lg-4 o_light_label"/>
-                                <field
-                                    name="l10n_ar_rg5329_account_id"
-                                    required="l10n_ar_rg5329_enabled"
-                                    options="{'no_create_edit': False}"/>
-                            </div>
-                            <div class="row">
-                                <label for="l10n_ar_rg5329_tax_group_id" class="col-lg-4 o_light_label"/>
-                                <field
-                                    name="l10n_ar_rg5329_tax_group_id"
-                                    required="l10n_ar_rg5329_enabled"
-                                    options="{'no_create_edit': False}"/>
-                            </div>
-                            <div class="row">
-                                <label for="l10n_ar_rg5329_min_amount" class="col-lg-4 o_light_label"/>
-                                <field name="l10n_ar_rg5329_min_amount"/>
-                            </div>
-                            <div class="row">
-                                <label for="l10n_ar_rg5329_responsibility_type_ids" class="col-lg-4 o_light_label"/>
-                                <field
-                                    name="l10n_ar_rg5329_responsibility_type_ids"
-                                    widget="many2many_tags"
-                                    options="{'no_create': True}"/>
-                            </div>
-                            <div class="row">
-                                <label for="l10n_ar_rg5329_product_categ_ids" class="col-lg-4 o_light_label"/>
-                                <div class="d-flex gap-2 flex-wrap align-items-center">
-                                    <field
-                                        name="l10n_ar_rg5329_product_categ_ids"
-                                        widget="many2many_tags"
-                                        options="{'no_create_edit': False}"/>
-                                    <button
-                                        name="action_l10n_ar_rg5329_sync_products"
-                                        type="object"
-                                        string="Asociar impuestos"
-                                        class="btn btn-secondary"
-                                        invisible="not l10n_ar_rg5329_enabled"/>
-                                </div>
-                            </div>
-                        </div>
-                    </setting>
-                </block>
+            <xpath expr="//form" position="inside">
+                <app string="RG 5329" name="l10n_ar_rg5329_perception">
+                    <block title="Localizacion Argentina - Percepcion IVA RG 5329/2023">
+                        <setting
+                            id="l10n_ar_rg5329_setting"
+                            string="Percepcion IVA RG 5329/2023"
+                            help="Permite habilitar el regimen de percepcion de IVA para bienes alcanzados por la RG 5329/2023.">
+                            <field name="l10n_ar_rg5329_enabled"/>
+                        </setting>
+
+                        <setting
+                            string="Cuenta contable"
+                            help="Cuenta de pasivo fiscal donde se registrara la percepcion.">
+                            <field
+                                name="l10n_ar_rg5329_account_id"
+                                required="l10n_ar_rg5329_enabled"
+                                options="{'no_create_edit': False}"/>
+                        </setting>
+
+                        <setting
+                            string="Grupo de impuestos"
+                            help="Grupo fiscal que se utilizara para los impuestos de percepcion RG 5329.">
+                            <field
+                                name="l10n_ar_rg5329_tax_group_id"
+                                required="l10n_ar_rg5329_enabled"
+                                options="{'no_create_edit': False}"/>
+                        </setting>
+
+                        <setting
+                            string="Importe minimo"
+                            help="La percepcion solo aplica si el importe calculado supera este minimo.">
+                            <field name="l10n_ar_rg5329_min_amount"/>
+                        </setting>
+
+                        <setting
+                            string="Tipos de contribuyentes alcanzados"
+                            help="Por defecto debe utilizarse Responsable Inscripto.">
+                            <field
+                                name="l10n_ar_rg5329_responsibility_type_ids"
+                                widget="many2many_tags"
+                                options="{'no_create': True}"/>
+                        </setting>
+
+                        <setting
+                            string="Categorias alcanzadas"
+                            help="Si no se seleccionan categorias, el regimen considera todos los productos.">
+                            <field
+                                name="l10n_ar_rg5329_product_categ_ids"
+                                widget="many2many_tags"
+                                options="{'no_create_edit': False}"/>
+                        </setting>
+
+                        <setting
+                            string="Actualizar productos"
+                            help="Limpia percepciones RG 5329 guardadas en productos. El calculo se realiza dinamicamente en facturas.">
+                            <button
+                                name="action_l10n_ar_rg5329_sync_products"
+                                type="object"
+                                string="Limpiar percepciones en productos"
+                                class="btn-secondary"
+                                invisible="not l10n_ar_rg5329_enabled"/>
+                        </setting>
+                    </block>
+                </app>
             </xpath>
         </field>
     </record>
