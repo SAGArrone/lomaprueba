@@ -111,45 +111,60 @@ class AccountMove(models.Model):
         )
 
     def _l10n_ar_rg5329_invoice_base_lines(self):
-    self.ensure_one()
+        self.ensure_one()
 
-    _logger.info("===== DEBUG RG5329 LINEAS =====")
-    _logger.info("invoice_line_ids: %s", len(self.invoice_line_ids))
-    _logger.info("line_ids: %s", len(self.line_ids))
+        candidate_lines = self.invoice_line_ids | self.line_ids
 
-    for line in self.invoice_line_ids:
+        def _is_base_line(line):
+            if line.display_type in ("line_section", "line_note"):
+                return False
+
+            if line.display_type in ("tax", "payment_term", "rounding", "cogs"):
+                return False
+
+            if line.tax_line_id:
+                return False
+
+            account_type = getattr(line.account_id, "account_type", False)
+            if account_type in ("asset_receivable", "liability_payable"):
+                return False
+
+            return bool(
+                line.product_id
+                or line.tax_ids
+                or line.quantity
+                or line.price_unit
+                or line.price_subtotal
+                or line.name
+            )
+
+        lines = candidate_lines.filtered(_is_base_line)
+
+        _logger.info("===== DEBUG RG5329 LINEAS =====")
         _logger.info(
-            "INV id=%s display=%s product=%s tax_line=%s subtotal=%s price_unit=%s qty=%s taxes=%s",
-            line.id,
-            line.display_type,
-            line.product_id.display_name if line.product_id else None,
-            bool(line.tax_line_id),
-            line.price_subtotal,
-            line.price_unit,
-            line.quantity,
-            line.tax_ids.mapped("name"),
+            "RG5329 V5.2 LINEAS DETECTADAS invoice_line_ids=%s line_ids=%s base=%s display_types=%s",
+            len(self.invoice_line_ids),
+            len(self.line_ids),
+            len(lines),
+            candidate_lines.mapped("display_type"),
         )
 
-    for line in self.line_ids:
-        _logger.info(
-            "LINE id=%s display=%s product=%s tax_line=%s subtotal=%s price_unit=%s qty=%s taxes=%s",
-            line.id,
-            line.display_type,
-            line.product_id.display_name if line.product_id else None,
-            bool(line.tax_line_id),
-            line.price_subtotal,
-            line.price_unit,
-            line.quantity,
-            line.tax_ids.mapped("name"),
-        )
+        for line in candidate_lines:
+            _logger.info(
+                "RG5329 LINE id=%s display=%s product=%s tax_line=%s account_type=%s subtotal=%s price_unit=%s qty=%s taxes=%s",
+                line.id,
+                line.display_type,
+                line.product_id.display_name if line.product_id else None,
+                bool(line.tax_line_id),
+                getattr(line.account_id, "account_type", False),
+                line.price_subtotal,
+                line.price_unit,
+                line.quantity,
+                line.tax_ids.mapped("name"),
+            )
 
-    return self.invoice_line_ids.filtered(
-        lambda line: (
-            line.display_type not in ("line_section", "line_note")
-            and not line.tax_line_id
-        )
-    )
-
+        return lines
+    
     def _l10n_ar_rg5329_line_base_amount(self, line):
         if line.quantity and line.price_unit:
             return line.quantity * line.price_unit * (1.0 - (line.discount or 0.0) / 100.0)
