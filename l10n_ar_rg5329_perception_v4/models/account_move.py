@@ -121,7 +121,13 @@ class AccountMove(models.Model):
         candidate_lines = self.invoice_line_ids | self.line_ids
 
         def _is_base_line(line):
-            if line.display_type or line.tax_line_id:
+            # Odoo 19 puede usar display_type='product' para lineas comerciales.
+            # Por eso NO se debe filtrar con `not line.display_type`.
+            if line.display_type in ("line_section", "line_note"):
+                return False
+            if line.display_type in ("tax", "payment_term", "rounding", "cogs"):
+                return False
+            if line.tax_line_id:
                 return False
 
             account_type = getattr(line.account_id, "account_type", False)
@@ -134,14 +140,16 @@ class AccountMove(models.Model):
                 or line.quantity
                 or line.price_unit
                 or line.price_subtotal
+                or line.name
             )
 
         lines = candidate_lines.filtered(_is_base_line)
         _logger.info(
-            "RG5329 V5.1 LINEAS DETECTADAS invoice_line_ids=%s line_ids=%s base=%s",
+            "RG5329 V5.2 LINEAS DETECTADAS invoice_line_ids=%s line_ids=%s base=%s display_types=%s",
             len(self.invoice_line_ids),
             len(self.line_ids),
             len(lines),
+            (self.invoice_line_ids | self.line_ids).mapped("display_type"),
         )
         return lines
 
@@ -181,7 +189,7 @@ class AccountMove(models.Model):
             result[rate_key]["lines"] |= line
 
         _logger.info(
-            "RG5329 V5.1 BASES ACUMULADAS POR ALICUOTA: %s",
+            "RG5329 V5.2 BASES ACUMULADAS POR ALICUOTA: %s",
             {key: value["base"] for key, value in result.items()},
         )
         return result
@@ -209,7 +217,7 @@ class AccountMove(models.Model):
                 )
             )
             _logger.info(
-                "RG5329 V5.1 CHECK rate=%s base_acumulada=%s percepcion_moneda_compania=%s minimo=%s",
+                "RG5329 V5.2 CHECK rate=%s base_acumulada=%s percepcion_moneda_compania=%s minimo=%s",
                 rate_key,
                 base,
                 perception_amount_company,
@@ -225,7 +233,7 @@ class AccountMove(models.Model):
             ):
                 applicable.add(rate_key)
 
-        _logger.info("RG5329 V5.1 ALICUOTAS APLICABLES: %s", applicable)
+        _logger.info("RG5329 V5.2 ALICUOTAS APLICABLES: %s", applicable)
         return applicable
 
     def _l10n_ar_rg5329_sync_invoice_taxes(self):
@@ -241,11 +249,11 @@ class AccountMove(models.Model):
 
             lines = move._l10n_ar_rg5329_invoice_base_lines()
             if not lines:
-                _logger.info("RG5329 V5.1: factura sin lineas base para evaluar")
+                _logger.info("RG5329 V5.2: factura sin lineas base para evaluar")
                 continue
 
             if not move._l10n_ar_rg5329_can_apply():
-                _logger.info("RG5329 V5.1: condiciones generales no alcanzadas, limpio percepciones")
+                _logger.info("RG5329 V5.2: condiciones generales no alcanzadas, limpio percepciones")
                 for line in lines:
                     clean_taxes = move._l10n_ar_rg5329_clean_taxes(line.tax_ids)
                     if set(clean_taxes.ids) != set(line.tax_ids.ids):
