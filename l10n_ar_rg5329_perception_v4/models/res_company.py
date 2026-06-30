@@ -89,15 +89,11 @@ class ResCompany(models.Model):
             for company in self:
                 if company._l10n_ar_rg5329_has_required_configuration():
                     company._l10n_ar_rg5329_ensure_taxes()
+                company._l10n_ar_rg5329_sync_products()
+                company._l10n_ar_rg5329_sync_draft_invoices()
         return res
 
     def action_l10n_ar_rg5329_sync_products(self):
-        """Manual button: clean RG5329 taxes from products.
-
-        The perception is dynamic in invoices. Products must keep only their regular VAT
-        and other taxes. This avoids charging RG5329 to non-reached partners or below
-        the legal minimum.
-        """
         for company in self:
             if not company._l10n_ar_rg5329_has_required_configuration():
                 raise ValidationError(
@@ -108,6 +104,7 @@ class ResCompany(models.Model):
                 )
             company._l10n_ar_rg5329_ensure_taxes()
             company._l10n_ar_rg5329_sync_products()
+            company._l10n_ar_rg5329_sync_draft_invoices()
         return True
 
     def _l10n_ar_rg5329_tax_values(self, rate_key):
@@ -149,11 +146,22 @@ class ResCompany(models.Model):
 
     def _l10n_ar_rg5329_find_tax(self, rate_key):
         self.ensure_one()
-        return self.env["account.tax"].sudo().with_company(self).search(
+        tax = self.env["account.tax"].sudo().with_company(self).search(
             [
                 ("company_id", "=", self.id),
                 ("l10n_ar_rg5329_perception", "=", True),
                 ("l10n_ar_rg5329_vat_rate", "=", rate_key),
+                ("type_tax_use", "=", "sale"),
+                ("active", "in", [True, False]),
+            ],
+            limit=1,
+        )
+        if tax:
+            return tax
+        return self.env["account.tax"].sudo().with_company(self).search(
+            [
+                ("company_id", "=", self.id),
+                ("name", "=", RG5329_TAX_SPECS[rate_key]["name"]),
                 ("type_tax_use", "=", "sale"),
                 ("active", "in", [True, False]),
             ],
@@ -186,6 +194,14 @@ class ResCompany(models.Model):
                     )
                     continue
 
+                tax.write(
+                    {
+                        "active": True,
+                        "l10n_ar_rg5329_perception": True,
+                        "l10n_ar_rg5329_vat_rate": rate_key,
+                    }
+                )
+
                 # Odoo blocks changing computation fields of taxes already used in entries.
                 # If the tax was already used, keep it as-is and only reuse it.
                 if company._l10n_ar_rg5329_tax_is_used(tax):
@@ -214,10 +230,13 @@ class ResCompany(models.Model):
 
     def _l10n_ar_rg5329_perception_taxes(self):
         self.ensure_one()
+        tax_names = [spec["name"] for spec in RG5329_TAX_SPECS.values()]
         return self.env["account.tax"].sudo().with_company(self).search(
             [
                 ("company_id", "=", self.id),
+                "|",
                 ("l10n_ar_rg5329_perception", "=", True),
+                ("name", "in", tax_names),
                 ("active", "=", True),
             ]
         )
@@ -236,7 +255,7 @@ class ResCompany(models.Model):
         self.ensure_one()
         categories = self.l10n_ar_rg5329_product_categ_ids
         if not categories:
-            return set(self.env["product.category"].sudo().search([]).ids)
+            return set()
         reached_categories = self.env["product.category"].sudo().search(
             [("id", "child_of", categories.ids)]
         )
@@ -264,17 +283,38 @@ class ResCompany(models.Model):
                 return rate_key
         return False
 
+    def _l10n_ar_rg5329_base_taxes(self, taxes):
+        self.ensure_one()
+        return taxes - self._l10n_ar_rg5329_perception_taxes()
+
     def _l10n_ar_rg5329_sync_products(self):
         ProductTemplate = self.env["product.template"].sudo()
         for company in self:
-            perception_taxes = company._l10n_ar_rg5329_perception_taxes()
-            if not perception_taxes:
-                continue
-            templates = ProductTemplate.with_company(company).search(
-                [("taxes_id", "in", perception_taxes.ids)]
-            )
-            for template in templates:
-                taxes = template.with_company(company).taxes_id - perception_taxes
+            tax_by_rate = company._l10n_ar_rg5329_perception_tax_by_rate()
+            reached_category_ids = company._l10n_ar_rg5329_reached_category_ids()
+            templates = ProductTemplate.with_company(company).search([])
+            for template in templates.with_company(company):
+                taxes = company._l10n_ar_rg5329_base_taxes(template.taxes_id)
+                should_apply = (
+                    company._l10n_ar_rg5329_has_required_configuration()
+                    and template.categ_id.id in reached_category_ids
+                )
+                if should_apply:
+                    rate_key = company._l10n_ar_rg5329_rate_key_from_taxes(taxes)
+                    if rate_key and tax_by_rate.get(rate_key):
+                        taxes |= tax_by_rate[rate_key]
                 template.with_company(company).with_context(
                     l10n_ar_rg5329_skip_product_sync=True
                 ).write({"taxes_id": [Command.set(taxes.ids)]})
+
+    def _l10n_ar_rg5329_sync_draft_invoices(self):
+        Move = self.env["account.move"].sudo()
+        for company in self:
+            moves = Move.with_company(company).search(
+                [
+                    ("company_id", "=", company.id),
+                    ("move_type", "=", "out_invoice"),
+                    ("state", "=", "draft"),
+                ]
+            )
+            moves._l10n_ar_rg5329_sync_invoice_taxes()
