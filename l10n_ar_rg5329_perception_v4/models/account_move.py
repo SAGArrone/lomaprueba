@@ -244,3 +244,24 @@ class AccountMove(models.Model):
                 clean_taxes = move._l10n_ar_rg5329_clean_taxes(line.tax_ids)
                 if set(clean_taxes.ids) != set(line.tax_ids.ids):
                     line.with_context(l10n_ar_rg5329_skip_invoice_sync=True).tax_ids = clean_taxes
+
+class AccountMoveLine(models.Model):
+    _inherit = "account.move.line"
+
+    @api.onchange(
+        "product_id",
+        "quantity",
+        "price_unit",
+        "discount",
+        "tax_ids",
+    )
+    def _onchange_l10n_ar_rg5329_line_fields(self):
+        for line in self:
+            move = line.move_id
+            if (
+                move
+                and move.move_type == "out_invoice"
+                and (move.state or "draft") == "draft"
+                and not self.env.context.get("l10n_ar_rg5329_skip_invoice_sync")
+            ):
+                move._l10n_ar_rg5329_sync_invoice_taxes()
