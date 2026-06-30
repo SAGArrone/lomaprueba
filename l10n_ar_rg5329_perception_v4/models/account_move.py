@@ -111,6 +111,13 @@ class AccountMove(models.Model):
         )
 
     def _l10n_ar_rg5329_invoice_base_lines(self):
+        """Return invoice base lines in a way that is robust in Odoo 19.
+
+        Odoo 19 may use display_type='product' for commercial lines.
+        Therefore we cannot filter commercial lines with `not line.display_type`.
+        We inspect both invoice_line_ids and line_ids because during onchange/save
+        one of the two recordsets may be more complete than the other.
+        """
         self.ensure_one()
 
         candidate_lines = self.invoice_line_ids | self.line_ids
@@ -118,10 +125,8 @@ class AccountMove(models.Model):
         def _is_base_line(line):
             if line.display_type in ("line_section", "line_note"):
                 return False
-
             if line.display_type in ("tax", "payment_term", "rounding", "cogs"):
                 return False
-
             if line.tax_line_id:
                 return False
 
@@ -151,7 +156,7 @@ class AccountMove(models.Model):
 
         for line in candidate_lines:
             _logger.info(
-                "RG5329 LINE id=%s display=%s product=%s tax_line=%s account_type=%s subtotal=%s price_unit=%s qty=%s taxes=%s",
+                "RG5329 V5.2 LINE id=%s display=%s product=%s tax_line=%s account_type=%s subtotal=%s price_unit=%s qty=%s taxes=%s",
                 line.id,
                 line.display_type,
                 line.product_id.display_name if line.product_id else None,
@@ -164,7 +169,7 @@ class AccountMove(models.Model):
             )
 
         return lines
-    
+
     def _l10n_ar_rg5329_line_base_amount(self, line):
         if line.quantity and line.price_unit:
             return line.quantity * line.price_unit * (1.0 - (line.discount or 0.0) / 100.0)
@@ -201,7 +206,7 @@ class AccountMove(models.Model):
             result[rate_key]["lines"] |= line
 
         _logger.info(
-            "RG5329 V5.2 BASES ACUMULADAS POR ALICUOTA: %s",
+            "RG5329 V5.1 BASES ACUMULADAS POR ALICUOTA: %s",
             {key: value["base"] for key, value in result.items()},
         )
         return result
@@ -229,7 +234,7 @@ class AccountMove(models.Model):
                 )
             )
             _logger.info(
-                "RG5329 V5.2 CHECK rate=%s base_acumulada=%s percepcion_moneda_compania=%s minimo=%s",
+                "RG5329 V5.1 CHECK rate=%s base_acumulada=%s percepcion_moneda_compania=%s minimo=%s",
                 rate_key,
                 base,
                 perception_amount_company,
@@ -245,7 +250,7 @@ class AccountMove(models.Model):
             ):
                 applicable.add(rate_key)
 
-        _logger.info("RG5329 V5.2 ALICUOTAS APLICABLES: %s", applicable)
+        _logger.info("RG5329 V5.1 ALICUOTAS APLICABLES: %s", applicable)
         return applicable
 
     def _l10n_ar_rg5329_sync_invoice_taxes(self):
@@ -261,11 +266,11 @@ class AccountMove(models.Model):
 
             lines = move._l10n_ar_rg5329_invoice_base_lines()
             if not lines:
-                _logger.info("RG5329 V5.2: factura sin lineas base para evaluar")
+                _logger.info("RG5329 V5.1: factura sin lineas base para evaluar")
                 continue
 
             if not move._l10n_ar_rg5329_can_apply():
-                _logger.info("RG5329 V5.2: condiciones generales no alcanzadas, limpio percepciones")
+                _logger.info("RG5329 V5.1: condiciones generales no alcanzadas, limpio percepciones")
                 for line in lines:
                     clean_taxes = move._l10n_ar_rg5329_clean_taxes(line.tax_ids)
                     if set(clean_taxes.ids) != set(line.tax_ids.ids):
