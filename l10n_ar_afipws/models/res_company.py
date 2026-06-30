@@ -230,6 +230,9 @@ class ResCompany(models.Model):
             fn = os.path.join(cache, fn)
         else:
             fn = os.path.join(wsaa.InstallDir, "cache", fn)
+        cache_dir = os.path.dirname(fn)
+        if cache_dir and not os.path.isdir(cache_dir):
+            os.makedirs(cache_dir)
 
         try:
             # read the access ticket (if already authenticated)
@@ -271,9 +274,8 @@ class ResCompany(models.Model):
                 err_msg = wsaa.Excepcion
             else:
                 # avoid encoding problem when reporting exceptions to the user:
-                err_msg = traceback.format_exception_only(sys.exc_type, sys.exc_value)[
-                    0
-                ]
+                exc_type, exc_value = sys.exc_info()[:2]
+                err_msg = traceback.format_exception_only(exc_type, exc_value)[0]
             raise UserError(
                 _("Could not connect. This is the what we received: %s") % (err_msg)
             )

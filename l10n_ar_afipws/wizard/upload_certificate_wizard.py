@@ -26,6 +26,10 @@ class L10nArAfipwsUploadCertificate(models.TransientModel):
     def action_confirm(self):
         """ """
         self.ensure_one()
-        self.certificate_id.write({"crt": base64.decodebytes(self.certificate_file)})
+        certificate_file = self.certificate_file
+        if isinstance(certificate_file, str):
+            certificate_file = certificate_file.encode("ascii")
+        certificate = base64.b64decode(certificate_file).decode("utf-8")
+        self.certificate_id.write({"crt": certificate})
         self.certificate_id.action_confirm()
         return True

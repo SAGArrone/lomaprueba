@@ -1,101 +1,223 @@
-.. |company| replace:: ADHOC SA
-
-.. |company_logo| image:: https://raw.githubusercontent.com/ingadhoc/maintainer-tools/master/resources/adhoc-logo.png
-   :alt: ADHOC SA
-   :target: https://www.adhoc.com.ar
-
-.. |icon| image:: https://raw.githubusercontent.com/ingadhoc/maintainer-tools/master/resources/adhoc-icon.png
-
-.. image:: https://img.shields.io/badge/license-AGPL--3-blue.png
-   :target: https://www.gnu.org/licenses/agpl
-   :alt: License: AGPL-3
-
 =========================================
-Modulo Base para los Web Services de AFIP
+AFIP Web Services Base - Argentina Odoo 19
 =========================================
 
-Homologation / production:
---------------------------
+Modulo base para conectar Odoo 19 con Web Services de AFIP/ARCA.
 
-First it search for a paramter "afip.ws.env.type" if exists and:
+Esta version mantiene la logica original del modulo y aplica solo ajustes de
+compatibilidad para Odoo 19, Python 3 y Odoo.sh.
 
-* is production --> production
-* is homologation --> homologation
+Alcance funcional
+=================
 
-Else
+El modulo permite:
 
-Search for 'server_mode' parameter on conf file. If that parameter:
+* Configurar el entorno AFIP: homologacion o produccion.
+* Administrar alias de certificados AFIP.
+* Generar clave privada y solicitud CSR.
+* Cargar certificados emitidos por AFIP.
+* Obtener y reutilizar conexiones/token/sign para servicios AFIP.
+* Consultar padron AFIP desde contactos.
+* Actualizar datos del contacto desde padron AFIP.
+* Consultar estado MiPyME para factura de credito electronica.
 
-* has a value then we use "homologation",
-* if no parameter, then "production"
+Servicios incluidos
+===================
 
-Incluye:
---------
+El modelo ``afipws.connection`` mantiene soporte para:
 
-* Wizard para instalar los claves para acceder a las Web Services.
-* API para realizar consultas en la Web Services desde OpenERP.
+* ``ws_sr_padron_a4``
+* ``ws_sr_padron_a5``
+* ``ws_sr_constancia_inscripcion``
+* ``wsfecred``
 
-El módulo l10n_ar_afipws permite a OpenERP acceder a los servicios del AFIP a
-travésde Web Services. Este módulo es un servicio para administradores y
-programadores, donde podrían configurar el servidor, la autentificación
-y además tendrán acceso a una API genérica en Python para utilizar los
-servicios AFIP.
+Los servicios ``ws_sr_padron_a10`` y ``ws_sr_padron_a100`` aparecen en la
+seleccion, pero no tienen implementacion de URL ni cliente en este modulo base.
+Se conservan para no cambiar la logica original y permitir extension por otros
+modulos.
 
-Para poder ejecutar los tests es necesario cargar la clave privada y el
-certificado al archivo test_key.yml.
+Instalacion en Odoo.sh
+======================
 
-Tenga en cuenta que estas claves son personales y pueden traer conflicto
-publicarlas en los repositorios públicos.
+1. Copiar la carpeta ``l10n_ar_afipws`` dentro del directorio de addons custom
+   del repositorio de Odoo.sh.
 
-Installation
-============
+2. Agregar las dependencias Python en el archivo ``requirements.txt`` del root
+   del repositorio Odoo.sh::
 
-To install this module, you need to:
+      pyafipws
+      pyOpenSSL
+      pysimplesoap
+      httplib2
 
-#. Do this ...
+   El archivo ``requirements.txt`` incluido dentro de este modulo es solo una
+   referencia. Odoo.sh instala dependencias desde el ``requirements.txt`` del
+   repositorio, no desde el manifest del modulo.
 
-Configuration
+3. Subir los cambios al repositorio y esperar el build de Odoo.sh.
+
+4. Actualizar lista de aplicaciones.
+
+5. Instalar ``Modulo Base para los Web Services de AFIP``.
+
+Dependencias Odoo
+=================
+
+El modulo declara dependencia de:
+
+* ``account``
+* ``contacts``
+* ``l10n_ar``
+
+Tambien requiere que la base tenga configurada la localizacion argentina y que
+la compania tenga CUIT valido.
+
+Configuracion funcional
+=======================
+
+1. Ir a ``Contabilidad > Configuracion > Ajustes``.
+
+2. En el bloque ``AFIP Web Services`` seleccionar:
+
+   * ``homologation`` para pruebas.
+   * ``production`` para operar contra AFIP/ARCA real.
+
+3. Ir a ``AFIP Web Services > Certificates``.
+
+4. Crear un alias de certificado:
+
+   * Compania.
+   * Tipo: homologacion o produccion.
+   * CUIT de la compania o proveedor de servicio.
+   * Ciudad/provincia/pais.
+
+5. Confirmar el alias. El sistema genera la clave privada.
+
+6. Crear la solicitud de certificado. Descargar el CSR.
+
+7. Cargar el CSR en AFIP/ARCA y descargar el certificado emitido.
+
+8. En Odoo, abrir el certificado y usar ``Upload Certificate`` para cargar el
+   archivo emitido por AFIP/ARCA.
+
+Uso funcional
 =============
 
-To configure this module, you need to:
+Consulta de padron
+------------------
 
-#. Go to ...
+Desde un contacto con CUIT:
 
-Usage
-=====
+1. Abrir el contacto.
+2. Usar el boton ``DATOS AFIP``.
+3. Elegir los campos a actualizar.
+4. Ejecutar actualizacion manual o automatica.
 
-To use this module, you need to:
+MiPyME / Factura de credito
+---------------------------
 
-#. Go to ...
+Desde un contacto:
 
-.. image:: https://odoo-community.org/website/image/ir.attachment/5784_f2813bd/datas
-   :alt: Try me on Runbot
-   :target: http://runbot.adhoc.com.ar/
+1. Abrir la pestana contable del contacto.
+2. Usar ``Check mi Pyme status``.
+3. El sistema consulta ``wsfecred`` y actualiza:
 
-Bug Tracker
-===========
+   * ``Must credit invoice``.
+   * ``Credit invoice from amount``.
 
-Bugs are tracked on `GitHub Issues
-<https://github.com/ingadhoc/odoo-argentina/issues>`_. In case of trouble, please
-check there if your issue has already been reported. If you spotted it first,
-help us smashing it by providing a detailed and welcomed feedback.
+Documentacion tecnica
+=====================
 
-Credits
-=======
+Modelos principales
+-------------------
 
-Images
-------
+``afipws.certificate_alias``
+    Alias/DN AFIP. Genera clave privada y solicitudes CSR.
 
-* |company| |icon|
+``afipws.certificate``
+    Certificado AFIP vinculado a un alias.
 
-Contributors
-------------
+``afipws.connection``
+    Token/sign y datos de conexion para cada Web Service.
 
-Maintainer
-----------
+``res.company``
+    Define entorno AFIP, obtiene certificados y autentica contra WSAA.
 
-|company_logo|
+``res.partner``
+    Consulta padron AFIP y actualiza datos de contacto.
 
-This module is maintained by the |company|.
+``res.partner.update.from.padron.wizard``
+    Wizard de actualizacion manual/automatica desde padron.
 
-To contribute to this module, please visit https://www.adhoc.com.ar.
+Parametros tecnicos
+-------------------
+
+``afip.ws.env.type``
+    Parametro de sistema con valores ``homologation`` o ``production``.
+
+Si el parametro no existe, el modulo conserva la logica original:
+
+* ``server_mode`` vacio o ``production`` usa produccion.
+* Cualquier otro ``server_mode`` usa homologacion.
+
+Certificados desde archivo de configuracion
+-------------------------------------------
+
+Si no existe certificado confirmado en base de datos, el modulo intenta leer:
+
+* ``afip_prod_pkey_file``
+* ``afip_prod_cert_file``
+* ``afip_homo_pkey_file``
+* ``afip_homo_cert_file``
+
+Estos parametros se leen desde la configuracion del servidor Odoo.
+
+Notas de migracion a Odoo 19
+============================
+
+Cambios aplicados sobre la version 18:
+
+* Manifest actualizado a serie ``19.0``.
+* Dependencias Odoo explicitas: ``account`` y ``contacts``.
+* Vista de ajustes migrada a estructura ``app/block/setting`` de Odoo 19.
+* Vistas listas mantenidas con ``<list>``.
+* Compatibilidad Python 3 en manejo de excepciones.
+* Conversion segura de certificados y claves entre ``bytes`` y texto PEM.
+* Correccion de generacion de archivo CSR descargable.
+
+No se cambio la logica de negocio del modulo.
+
+Problemas frecuentes
+====================
+
+Falta dependencia Python
+------------------------
+
+Si Odoo informa que falta ``pyafipws``, ``OpenSSL`` o ``pysimplesoap``, revisar
+el ``requirements.txt`` del repositorio Odoo.sh y volver a ejecutar el build.
+
+No aparece el bloque de configuracion
+-------------------------------------
+
+Actualizar lista de aplicaciones y actualizar el modulo. El bloque se agrega en
+ajustes de Contabilidad.
+
+AFIP no responde
+----------------
+
+El modulo conserva la accion de ayuda que abre la consulta manual de constancia
+AFIP/ARCA cuando el servicio no esta disponible.
+
+Campos de padron no encontrados
+-------------------------------
+
+La actualizacion de padron usa campos de localizacion argentina como
+``imp_iva_padron``, ``imp_ganancias_padron``, ``actividades_padron`` e
+``impuestos_padron``. Si la base no los tiene, instalar primero el modulo de
+localizacion que los provee o extender este modulo con esos campos.
+
+Licencia
+========
+
+AGPL-3
+

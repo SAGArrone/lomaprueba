@@ -70,7 +70,7 @@ class AfipwsCertificate(models.Model):
         for rec in self:
             rec.request_filename = "request.csr"
             if rec.csr:
-                rec.request_file = base64.encodebytes(self.csr.encode("utf-8"))
+                rec.request_file = base64.b64encode(rec.csr.encode("utf-8"))
             else:
                 rec.request_file = False
 
@@ -118,13 +118,16 @@ class AfipwsCertificate(models.Model):
         Return Certificate object.
         """
         self.ensure_one()
+        if crypto is None:
+            raise UserError(_("The Python library pyOpenSSL is required."))
         if self.crt:
             try:
                 certificate = crypto.load_certificate(
                     crypto.FILETYPE_PEM, self.crt.encode("ascii")
                 )
             except Exception as e:
-                if "Expecting: CERTIFICATE" in e[0]:
+                error = str(e)
+                if "Expecting: CERTIFICATE" in error:
                     raise UserError(
                         _(
                             "Wrong Certificate file format.\nBe sure you have "
@@ -133,7 +136,7 @@ class AfipwsCertificate(models.Model):
                     )
                 else:
                     raise UserError(
-                        _("Unknown error.\nX509 return this message:\n %s") % (e[0])
+                        _("Unknown error.\nX509 return this message:\n %s") % error
                     )
         else:
             certificate = None

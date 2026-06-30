@@ -3,7 +3,7 @@
 # directory
 ##############################################################################
 from odoo import fields, models, api, _
-from odoo.exceptions import ValidationError
+from odoo.exceptions import UserError, ValidationError
 
 try:
     from OpenSSL import crypto
@@ -126,6 +126,11 @@ class AfipwsCertificateAlias(models.Model):
         readonly=True,
     )
 
+    def _l10n_ar_afipws_pem_to_text(self, pem):
+        if isinstance(pem, bytes):
+            return pem.decode("ascii")
+        return pem
+
     @api.onchange("company_id")
     def change_company_name(self):
         if self.company_id:
@@ -157,10 +162,14 @@ class AfipwsCertificateAlias(models.Model):
     def generate_key(self, key_length=2048):
         """ """
         # TODO reemplazar todo esto por las funciones nativas de pyafipws
+        if crypto is None:
+            raise UserError(_("The Python library pyOpenSSL is required."))
         for rec in self:
             k = crypto.PKey()
             k.generate_key(crypto.TYPE_RSA, key_length)
-            rec.key = crypto.dump_privatekey(crypto.FILETYPE_PEM, k)
+            rec.key = rec._l10n_ar_afipws_pem_to_text(
+                crypto.dump_privatekey(crypto.FILETYPE_PEM, k)
+            )
 
     def action_to_draft(self):
         self.write({"state": "draft"})
@@ -175,28 +184,32 @@ class AfipwsCertificateAlias(models.Model):
         """
         TODO agregar descripcion y ver si usamos pyafipsw para generar esto
         """
+        if crypto is None:
+            raise UserError(_("The Python library pyOpenSSL is required."))
         for record in self:
             req = crypto.X509Req()
-            req.get_subject().C = self.country_id.code.encode("ascii", "ignore")
-            if self.state_id:
-                req.get_subject().ST = self.state_id.name.encode("ascii", "ignore")
-            req.get_subject().L = self.city.encode("ascii", "ignore")
-            req.get_subject().O = self.company_id.name.encode("ascii", "ignore")
-            req.get_subject().OU = self.department.encode("ascii", "ignore")
-            req.get_subject().CN = self.common_name.encode("ascii", "ignore")
-            req.get_subject().serialNumber = "CUIT %s" % self.cuit.encode(
-                "ascii", "ignore"
+            req.get_subject().C = record.country_id.code
+            if record.state_id:
+                req.get_subject().ST = record.state_id.name
+            req.get_subject().L = record.city
+            req.get_subject().O = record.company_id.name
+            req.get_subject().OU = record.department
+            req.get_subject().CN = record.common_name
+            req.get_subject().serialNumber = "CUIT %s" % record.cuit
+            k = crypto.load_privatekey(crypto.FILETYPE_PEM, record.key)
+            record.key = record._l10n_ar_afipws_pem_to_text(
+                crypto.dump_privatekey(crypto.FILETYPE_PEM, k)
             )
-            k = crypto.load_privatekey(crypto.FILETYPE_PEM, self.key)
-            self.key = crypto.dump_privatekey(crypto.FILETYPE_PEM, k)
             req.set_pubkey(k)
             req.sign(k, "sha256")
-            csr = crypto.dump_certificate_request(crypto.FILETYPE_PEM, req)
+            csr = record._l10n_ar_afipws_pem_to_text(
+                crypto.dump_certificate_request(crypto.FILETYPE_PEM, req)
+            )
             vals = {
                 "csr": csr,
                 "alias_id": record.id,
             }
-            self.certificate_ids.create(vals)
+            record.certificate_ids.create(vals)
         return True
 
     @api.constrains("common_name")
