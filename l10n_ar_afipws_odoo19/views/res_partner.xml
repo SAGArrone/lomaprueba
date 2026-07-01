@@ -10,7 +10,9 @@
                     <group name="miPyme" string="Mi PyME">
                         <field name="mipyme_required"/>
                         <field name="mipyme_from_amount" invisible="not mipyme_required"/>
-                        <button name="l10n_ar_afipws_fe_min_ammount" string="Check Mi PyME status" type="object"/>
+                        <button name="l10n_ar_afipws_fe_min_ammount"
+                                string="Check Mi PyME status"
+                                type="object"/>
                     </group>
                 </page>
             </xpath>
@@ -20,7 +22,7 @@
     <record id="view_partner_form" model="ir.ui.view">
         <field name="name">res.partner.form.afipws.button</field>
         <field name="model">res.partner</field>
-        <field name="priority" eval="90"/>
+        <field eval="90" name="priority"/>
         <field name="inherit_id" ref="base.view_partner_form"/>
         <field name="arch" type="xml">
             <xpath expr="//div[@name='button_box']" position="inside">
