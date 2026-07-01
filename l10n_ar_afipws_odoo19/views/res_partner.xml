@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+
+    <record id="mipymepartner_form" model="ir.ui.view">
+        <field name="name">mipymepartner.form</field>
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="base.view_partner_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//sheet/notebook" position="inside">
+                <page string="Mi PyME" name="mipyme_page">
+                    <group name="miPyme" string="Mi PyME">
+                        <field name="mipyme_required"/>
+                        <field name="mipyme_from_amount" invisible="not mipyme_required"/>
+                        <button name="l10n_ar_afipws_fe_min_ammount"
+                                string="Check MiPyME Status"
+                                type="object"
+                                class="btn-primary"/>
+                    </group>
+                </page>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_partner_form" model="ir.ui.view">
+        <field name="name">res.partner.form.afip</field>
+        <field name="model">res.partner</field>
+        <field name="priority">90</field>
+        <field name="inherit_id" ref="base.view_partner_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//div[@name='button_box']" position="inside">
+                <button class="oe_stat_button"
+                        icon="fa-rss"
+                        name="%(action_partner_update)d"
+                        type="action">
+                    <div class="o_form_field o_stat_info">
+                        <span class="o_stat_value">DATOS AFIP</span>
+                        <span class="o_stat_text">
+                            <field name="last_update_census" readonly="1"/>
+                        </span>
+                    </div>
+                </button>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>

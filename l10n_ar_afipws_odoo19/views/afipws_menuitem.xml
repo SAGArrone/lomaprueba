@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!--
+        Se conserva el XML ID menu_afipws para compatibilidad con instalaciones
+        previas y referencias internas, pero se deja inactivo para que no aparezca
+        el icono/aplicacion "AFIP Web Services" en el menu principal.
+    -->
+    <record id="menu_afipws" model="ir.ui.menu">
+        <field name="name">AFIP Web Services</field>
+        <field name="sequence">35</field>
+        <field name="active">False</field>
+    </record>
+</odoo>
