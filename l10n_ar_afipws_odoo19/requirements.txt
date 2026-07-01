@@ -1,0 +1,4 @@
+pyafipws
+pyOpenSSL
+pysimplesoap
+httplib2
