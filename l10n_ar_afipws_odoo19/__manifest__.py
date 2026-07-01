@@ -15,7 +15,7 @@
         "security/security.xml",
         "security/ir.model.access.csv",
         "data/ir.actions.url_data.xml",
-        "views/afipws_menuitem.xml",
+        #"views/afipws_menuitem.xml",
         "wizard/upload_certificate_view.xml",
         "wizard/res_partner_update_from_padron_wizard_view.xml",
         "views/afipws_certificate_view.xml",
