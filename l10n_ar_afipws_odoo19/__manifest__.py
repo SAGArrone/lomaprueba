@@ -5,7 +5,7 @@
     "sequence": 14,
     "author": "ADHOC SA, Moldeo Interactive, Odoo Community Association (OCA), Lomasoft Innovaciones SRL",
     "license": "AGPL-3",
-    "summary": "AFIP Web Services base module compatible with Odoo 19",
+    "summary": "Base para Web Services de AFIP compatible con Odoo 19",
     "depends": [
         "account",
         "contacts",
