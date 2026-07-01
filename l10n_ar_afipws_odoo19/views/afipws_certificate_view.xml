@@ -6,6 +6,11 @@
         <field name="arch" type="xml">
             <form string="AFIP Certificates">
                 <header>
+                    <button name="%(action_upload_certificate)d"
+                        type="action"
+                        invisible="state != 'draft'"
+                        class="oe_highlight"
+                        string="Upload Certificate"/>
                     <button name="action_confirm"
                         type="object"
                         invisible="state != 'draft'"
