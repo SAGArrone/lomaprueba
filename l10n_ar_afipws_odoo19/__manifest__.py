@@ -1,5 +1,5 @@
 {
-    "name": "Modulo Base para los Web Services de AFIP",
+    "name": "Modulo Base para los Web Services de AFIP Odoo 19",
     "version": "19.0.1.0.0",
     "category": "Localization/Argentina",
     "sequence": 14,

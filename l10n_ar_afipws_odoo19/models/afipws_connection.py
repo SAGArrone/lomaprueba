@@ -186,7 +186,7 @@ class AfipwsConnection(models.Model):
                 or "module 'httplib2' has no attribute 'SSLHandshakeError'"
                 in repr(error)
             ):
-                action = self.env.ref("l10n_ar_afipws.action_afip_padron")
+                action = self.env.ref("l10n_ar_afipws_odoo19.action_afip_padron")
                 msg = _(
                     "It seems like AFIP service is not available.\nPlease try again later or try manually"
                 )

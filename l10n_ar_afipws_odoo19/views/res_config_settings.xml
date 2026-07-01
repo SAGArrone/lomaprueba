@@ -12,8 +12,8 @@
                         <setting string="Entorno AFIP" help="Configura el entorno usado para autenticacion y consultas de padron AFIP.">
                             <field name="afip_ws_env_type" class="fw-bold"/>
                             <div class="mt16">
-                                <button class="btn btn-link" icon="fa-arrow-right" name="%(l10n_ar_afipws.act_afipws_certificate_alias)d" string="Lista certificados" type="action"/>
-                                <button class="btn btn-link" icon="fa-arrow-right" name="%(l10n_ar_afipws.act_afipws_auth)d" string="Lista conexiones" type="action"/>
+                                <button class="btn btn-link" icon="fa-arrow-right" name="%(l10n_ar_afipws_odoo19.act_afipws_certificate_alias)d" string="Lista certificados" type="action"/>
+                                <button class="btn btn-link" icon="fa-arrow-right" name="%(l10n_ar_afipws_odoo19.act_afipws_auth)d" string="Lista conexiones" type="action"/>
                             </div>
                         </setting>
                     </block>
